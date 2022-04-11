@@ -1,0 +1,28 @@
+branding:
+  color: orange
+  icon: triangle
+description: 'Cloudflare KV Action'
+inputs:
+  namespace_identifier:
+    description: 'Cloudflare namespace id'
+    required: true
+  key_name:
+    description: 'Cloudflare KV key name'
+    required: true
+  expiration:
+    description: 'Cloudflare KV key expiration date'
+    required: false
+  expiration_ttl:
+    description: 'Cloudflare KV key expiration time'
+    required: false
+  value:
+    description: 'Cloudflare KV value'
+    required: false
+
+name: Cloudflare KV Action
+outputs:
+  value:
+    description: 'Value from KV store'
+runs:
+  main: dist/index.js
+  using: node16

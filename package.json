@@ -1,0 +1,71 @@
+{
+  "name": "@zentered.co/cloudflare-kv-action",
+  "version": "1.0.0",
+  "private": true,
+  "description": "GitHub Action set and get Cloudflare KV values",
+  "keywords": [
+    "cloudflare",
+    "kv",
+    "github",
+    "action"
+  ],
+  "homepage": "https://github.com/zentered/cloudflare-kv-action#readme",
+  "bugs": {
+    "url": "https://github.com/zentered/cloudflare-kv-action/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zentered/cloudflare-kv-action.git"
+  },
+  "license": "MIT",
+  "author": "Zentered <hi@zentered.co> (https://zentered.co)",
+  "contributors": [
+    "Patrick Heneise (https://github.com/zentered)"
+  ],
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "npm run lint && npm run test && npm run prepare",
+    "postinstall": "husky install",
+    "lint": "eslint .",
+    "prepare": "ncc build index.js -o dist --source-map --license licenses.txt",
+    "prepublishOnly": "pinst --disable",
+    "postpublish": "pinst --enable",
+    "test": "tap --node-arg=--require=dotenv/config"
+  },
+  "commitlint": {
+    "extends": [
+      "@commitlint/config-conventional"
+    ]
+  },
+  "lint-staged": {
+    "*.{js,json,md}": [
+      "prettier --write"
+    ],
+    "*.js": [
+      "eslint --cache --fix"
+    ]
+  },
+  "release": {
+    "branches": [
+      "main"
+    ]
+  },
+  "dependencies": {
+    "@actions/core": "^1.6.0",
+    "node-fetch": "^3.2.3"
+  },
+  "devDependencies": {
+    "@commitlint/config-conventional": "^16.2.1",
+    "@vercel/ncc": "^0.33.3",
+    "commitlint": "^16.2.3",
+    "dotenv": "^16.0.0",
+    "eslint": "^8.13.0",
+    "eslint-plugin-json": "^3.1.0",
+    "eslint-plugin-node": "^11.1.0",
+    "husky": "^7.0.4",
+    "pinst": "^3.0.0",
+    "prettier": "^2.6.2",
+    "tap": "^16.0.1"
+  }
+}
