@@ -18,7 +18,10 @@ Put and get values from Cloudflare KV.
 
 [Copy your "Global API Key"](https://dash.cloudflare.com/profile/api-tokens)
 
-Cloudflare needs a little time to build the preview, you can check the average build time in your deployments and add the seconds plus a little to a `sleep` action, to wait until the deployment is ready. The action only works on branches, so make sure you exclude the `main` branch from the trigger:
+Cloudflare needs a little time to build the preview, you can check the average
+build time in your deployments and add the seconds plus a little to a `sleep`
+action, to wait until the deployment is ready. The action only works on
+branches, so make sure you exclude the `main` branch from the trigger:
 
 ```yaml
 on:
@@ -36,7 +39,7 @@ Here are the steps for an example job:
   uses: zentered/cloudflare-kv-action@v1.0.0
   id: cloudflare_kv
   env:
-    CLOUDFLARE_AUTH_KEY: ${{ secrets.CLOUDFLARE_AUTH_KEY }}
+    CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
     CLOUDFLARE_ACCOUNT_EMAIL: ${{ secrets.CLOUDFLARE_ACCOUNT_EMAIL }}
     CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
   with:
@@ -50,23 +53,28 @@ Here are the steps for an example job:
 
 ## Environment Variables / Secret
 
-In the repository, go to "Settings", then "Secrets" and add "CLOUDFLARE_API_TOKEN", the value you can retrieve on your [Cloudflare account](https://dash.cloudflare.com/profile/api-tokens). You also need to add:
+In the repository, go to "Settings", then "Secrets" and add
+"CLOUDFLARE_API_TOKEN", the value you can retrieve on your
+[Cloudflare account](https://dash.cloudflare.com/profile/api-tokens). You also
+need to add:
 
 - `CLOUDFLARE_ACCOUNT_EMAIL` (your login email, optional)
-- `CLOUDFLARE_ACCOUNT_ID` (from the URL: `https://dash.cloudflare.com/123abc....`)
-- `CLOUDFLARE_AUTH_KEY` (from the URL: `https://dash.cloudflare.com/profile/api-tokens`)
+- `CLOUDFLARE_ACCOUNT_ID` (from the URL:
+  `https://dash.cloudflare.com/123abc....`)
+- `CLOUDFLARE_API_KEY` (from the URL:
+  `https://dash.cloudflare.com/profile/api-tokens`)
 
 ## Inputs
 
 | Name                   | Requirement | Description                                                                                                                                                               |
 | ---------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `namespace_identifier` | required    | Cloudflare namespace id                                                                                                                                                   |
+| `namespace_identifier` | required    | Cloudflare namespace ID                                                                                                                                                   |
 | `key_name`             | required    | KV key name                                                                                                                                                               |
 | `value`                | optional    | Optional: Use "value" to set a key, otherwise it will be retrieved                                                                                                        |
 | `expiration`           | optional    | Optional: expiration                                                                                                                                                      |
 | `expiration_ttl`       | optional    | Optional: If neither expiration nor expiration_ttl is specified, the key-value pair will never expire. If both are set, expiration_ttl is used and expiration is ignored. |
 
-Cloudflare API Reference: https://api.cloudflare.com/#workers-kv-namespace-write-key-value-pair
+[Cloudflare API Reference](https://api.cloudflare.com/#workers-kv-namespace-write-key-value-pair)
 
 ## Outputs
 
