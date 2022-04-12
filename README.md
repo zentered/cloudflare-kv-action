@@ -74,8 +74,7 @@ need to add:
 | `expiration`           | optional    | Optional: expiration                                                                                                                                                      |
 | `expiration_ttl`       | optional    | Optional: If neither expiration nor expiration_ttl is specified, the key-value pair will never expire. If both are set, expiration_ttl is used and expiration is ignored. |
 
-Cloudflare API Reference:
-https://api.cloudflare.com/#workers-kv-namespace-write-key-value-pair
+[Cloudflare API Reference](https://api.cloudflare.com/#workers-kv-namespace-write-key-value-pair)
 
 ## Outputs
 
