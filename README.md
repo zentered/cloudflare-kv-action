@@ -68,7 +68,7 @@ need to add:
 
 | Name                   | Requirement | Description                                                                                                                                                               |
 | ---------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `namespace_identifier` | required    | Cloudflare namespace id                                                                                                                                                   |
+| `namespace_identifier` | required    | Cloudflare namespace ID                                                                                                                                                   |
 | `key_name`             | required    | KV key name                                                                                                                                                               |
 | `value`                | optional    | Optional: Use "value" to set a key, otherwise it will be retrieved                                                                                                        |
 | `expiration`           | optional    | Optional: expiration                                                                                                                                                      |
