@@ -21,7 +21,7 @@ jobs:
           fetch-depth: 0
       - run: npm ci
       - name: Lint Code Base
-        uses: github/super-linter@v4.9.2
+        uses: github/super-linter@v4.9.4
         env:
           LINTER_RULES_PATH: /
           FILTER_REGEX_EXCLUDE: (.*dist\/.*)|(.husky\/.*)|(.test\/.*)
