@@ -2,7 +2,7 @@
 
 ![Test](https://github.com/zentered/cloudflare-kv-action/workflows/Test/badge.svg)
 ![Release](https://github.com/zentered/cloudflare-kv-action/workflows/Publish/badge.svg)
-![Semantic Release](https://github.com/govolition/storefront-api/workflows/Semantic%20Release/badge.svg)
+[![semantic-release: conventional](https://img.shields.io/badge/semantic--release-conventional-e10079?logo=semantic-release)](https://github.com/semantic-release/semantic-release)
 [![Conventional Commits](https://img.shields.io/badge/Conventional%20Commits-1.0.0-yellow.svg)](https://conventionalcommits.org)
 
 Put and get values from Cloudflare KV.
