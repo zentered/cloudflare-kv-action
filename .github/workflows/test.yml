@@ -31,3 +31,8 @@ jobs:
           DEFAULT_BRANCH: main
           IGNORE_GENERATED_FILES: true
       - run: npm test
+        env:
+          CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_NAMESPACE_IDENTIFIER:
+            ${{ secrets.CLOUDFLARE_NAMESPACE_IDENTIFIER }}
