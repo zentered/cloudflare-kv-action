@@ -52,20 +52,23 @@
     ]
   },
   "dependencies": {
-    "@actions/core": "^1.9.1",
-    "node-fetch": "^3.2.10"
+    "@actions/core": "^1.10.0",
+    "node-fetch": "^3.3.0"
   },
   "devDependencies": {
-    "@commitlint/config-conventional": "^16.2.1",
-    "@vercel/ncc": "^0.33.3",
-    "commitlint": "^16.2.3",
-    "dotenv": "^16.0.0",
-    "eslint": "^8.13.0",
+    "@commitlint/config-conventional": "^17.4.0",
+    "@vercel/ncc": "^0.36.0",
+    "commitlint": "^17.4.0",
+    "dotenv": "^16.0.3",
+    "eslint": "^8.31.0",
     "eslint-plugin-json": "^3.1.0",
     "eslint-plugin-node": "^11.1.0",
-    "husky": "^7.0.4",
+    "husky": "^8.0.3",
     "pinst": "^3.0.0",
-    "prettier": "^2.6.2",
-    "tap": "^16.0.1"
+    "prettier": "^2.8.2",
+    "tap": "^16.3.3"
+  },
+  "engines": {
+    "node": ">=16"
   }
 }
