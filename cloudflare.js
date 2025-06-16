@@ -37,9 +37,8 @@ async function get(kvUrl, headers) {
     responseType: 'json',
     responseEncoding: 'utf8'
   })
-  const data = await response.text()
-  const json = JSON.parse(data)
-  return json
+  const text = await response.text()
+  return text
 }
 
 export default async function kv(
