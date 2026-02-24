@@ -26,12 +26,12 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "npm run lint && npm run test && npm run prepare",
-    "postinstall": "husky install",
+    "postinstall": "husky",
     "lint": "eslint .",
     "prepare": "ncc build index.js -o dist --source-map --license licenses.txt",
     "prepublishOnly": "pinst --disable",
     "postpublish": "pinst --enable",
-    "test": "tap --node-arg=--require=dotenv/config"
+    "test": "node --env-file-if-exists=.env --test test/cloudflare.test.js"
   },
   "commitlint": {
     "extends": [
@@ -52,23 +52,21 @@
     ]
   },
   "dependencies": {
-    "@actions/core": "^1.10.0",
-    "node-fetch": "^3.3.0"
+    "@actions/core": "^3.0.0"
   },
   "devDependencies": {
-    "@commitlint/config-conventional": "^17.4.0",
-    "@vercel/ncc": "^0.36.0",
-    "commitlint": "^17.4.0",
-    "dotenv": "^16.0.3",
-    "eslint": "^8.31.0",
-    "eslint-plugin-json": "^3.1.0",
-    "eslint-plugin-node": "^11.1.0",
-    "husky": "^8.0.3",
+    "@commitlint/config-conventional": "^19.0.0",
+    "@eslint/js": "^9.39.3",
+    "@vercel/ncc": "^0.38.4",
+    "commitlint": "^19.0.0",
+    "eslint": "^9.39.3",
+    "eslint-plugin-json": "^4.0.1",
+    "eslint-plugin-n": "^17.24.0",
+    "husky": "^9.1.7",
     "pinst": "^3.0.0",
-    "prettier": "^2.8.2",
-    "tap": "^16.3.3"
+    "prettier": "^3.8.1"
   },
   "engines": {
-    "node": ">=16"
+    "node": ">=24"
   }
 }

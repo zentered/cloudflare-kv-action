@@ -1,5 +1,4 @@
-import core from '@actions/core'
-import fetch from 'node-fetch'
+import * as core from '@actions/core'
 
 const API_VERSION = 'v4'
 
@@ -22,24 +21,39 @@ async function set(kvUrl, headers, value, expiration, expirationTtl) {
     }
   }
 
-  await fetch(url, {
+  const response = await fetch(url, {
     method: 'PUT',
     body: value,
     headers
   })
 
+  if (!response.ok) {
+    const body = await response.text().catch(() => '')
+    throw new Error(
+      `PUT failed: ${response.status} ${response.statusText}${body ? ` — ${body}` : ''}`
+    )
+  }
+
   return null
 }
 
 async function get(kvUrl, headers) {
-  const response = await fetch(kvUrl, {
-    headers,
-    responseType: 'json',
-    responseEncoding: 'utf8'
-  })
+  const response = await fetch(kvUrl, { headers })
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => '')
+    throw new Error(
+      `GET failed: ${response.status} ${response.statusText}${body ? ` — ${body}` : ''}`
+    )
+  }
+
   const data = await response.text()
-  const json = JSON.parse(data)
-  return json
+  try {
+    return JSON.parse(data)
+  } catch (err) {
+    if (!(err instanceof SyntaxError)) throw err
+    return data
+  }
 }
 
 export default async function kv(
@@ -65,7 +79,7 @@ export default async function kv(
 
   if (value && (value.length > 0 || Object.keys(value).length > 0)) {
     core.info(`Setting value for ${key}`)
-    return set(kvUrl, headers, value, expirationTtl)
+    return set(kvUrl, headers, value, expiration, expirationTtl)
   } else {
     core.info(`Getting value for ${key}`)
     return get(kvUrl, headers)
