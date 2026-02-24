@@ -11,7 +11,7 @@ export default [
   jsonPlugin.configs['recommended'],
   {
     languageOptions: {
-      ecmaVersion: 2021,
+      ecmaVersion: 'latest',
       sourceType: 'module'
     }
   }
