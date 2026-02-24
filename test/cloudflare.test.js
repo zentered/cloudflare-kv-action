@@ -1,4 +1,3 @@
-/* eslint-disable node/no-unpublished-import */
 'use strict'
 
 import t from 'tap'
