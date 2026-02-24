@@ -28,7 +28,10 @@ async function set(kvUrl, headers, value, expiration, expirationTtl) {
   })
 
   if (!response.ok) {
-    throw new Error(`PUT failed: ${response.status} ${response.statusText}`)
+    const body = await response.text().catch(() => '')
+    throw new Error(
+      `PUT failed: ${response.status} ${response.statusText}${body ? ` — ${body}` : ''}`
+    )
   }
 
   return null
@@ -38,13 +41,17 @@ async function get(kvUrl, headers) {
   const response = await fetch(kvUrl, { headers })
 
   if (!response.ok) {
-    throw new Error(`GET failed: ${response.status} ${response.statusText}`)
+    const body = await response.text().catch(() => '')
+    throw new Error(
+      `GET failed: ${response.status} ${response.statusText}${body ? ` — ${body}` : ''}`
+    )
   }
 
   const data = await response.text()
   try {
     return JSON.parse(data)
-  } catch {
+  } catch (err) {
+    if (!(err instanceof SyntaxError)) throw err
     return data
   }
 }

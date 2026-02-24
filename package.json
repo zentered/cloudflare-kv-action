@@ -31,7 +31,7 @@
     "prepare": "ncc build index.js -o dist --source-map --license licenses.txt",
     "prepublishOnly": "pinst --disable",
     "postpublish": "pinst --enable",
-    "test": "node --env-file=.env --test test/cloudflare.test.js"
+    "test": "node --env-file-if-exists=.env --test test/cloudflare.test.js"
   },
   "commitlint": {
     "extends": [

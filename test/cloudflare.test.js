@@ -101,6 +101,16 @@ describe('unit: GET response parsing', () => {
     assert.equal(result, 'plain text value')
     delete globalThis.fetch
   })
+
+  it('returns null for JSON null value', async () => {
+    globalThis.fetch = async () => ({
+      ok: true,
+      text: async () => 'null'
+    })
+    const result = await kv('acct', '', 'tok', 'ns', 'key')
+    assert.equal(result, null)
+    delete globalThis.fetch
+  })
 })
 
 describe('unit: object value serialization', () => {
@@ -121,7 +131,8 @@ describe('unit: error handling', () => {
     globalThis.fetch = async () => ({
       ok: false,
       status: 403,
-      statusText: 'Forbidden'
+      statusText: 'Forbidden',
+      text: async () => ''
     })
     await assert.rejects(
       () => kv('acct', '', 'tok', 'ns', 'key', 'val'),
@@ -134,11 +145,42 @@ describe('unit: error handling', () => {
     globalThis.fetch = async () => ({
       ok: false,
       status: 404,
-      statusText: 'Not Found'
+      statusText: 'Not Found',
+      text: async () => ''
     })
     await assert.rejects(
       () => kv('acct', '', 'tok', 'ns', 'key'),
       /GET failed: 404 Not Found/
+    )
+    delete globalThis.fetch
+  })
+
+  it('includes error body in PUT failure message', async () => {
+    globalThis.fetch = async () => ({
+      ok: false,
+      status: 401,
+      statusText: 'Unauthorized',
+      text: async () =>
+        '{"errors":[{"code":10000,"message":"Authentication error"}]}'
+    })
+    await assert.rejects(
+      () => kv('acct', '', 'tok', 'ns', 'key', 'val'),
+      /PUT failed: 401 Unauthorized — \{"errors"/
+    )
+    delete globalThis.fetch
+  })
+
+  it('includes error body in GET failure message', async () => {
+    globalThis.fetch = async () => ({
+      ok: false,
+      status: 401,
+      statusText: 'Unauthorized',
+      text: async () =>
+        '{"errors":[{"code":10000,"message":"Authentication error"}]}'
+    })
+    await assert.rejects(
+      () => kv('acct', '', 'tok', 'ns', 'key'),
+      /GET failed: 401 Unauthorized — \{"errors"/
     )
     delete globalThis.fetch
   })

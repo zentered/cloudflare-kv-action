@@ -24,7 +24,7 @@ async function run() {
       expirationTtl
     )
 
-    if (returnValue) {
+    if (returnValue !== null && returnValue !== undefined) {
       core.setOutput('value', returnValue)
     }
   } catch (error) {
