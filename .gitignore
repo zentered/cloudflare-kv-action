@@ -35,3 +35,6 @@ coverage
 
 # dotenv environment variables file
 .env
+
+# Claude Code local session data
+.claude/
