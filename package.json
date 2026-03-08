@@ -59,7 +59,7 @@
     "@eslint/js": "^9.39.4",
     "@vercel/ncc": "^0.38.4",
     "commitlint": "^20.4.3",
-    "eslint": "^9.39.4",
+    "eslint": "^10.0.3",
     "eslint-plugin-json": "^4.0.1",
     "eslint-plugin-n": "^17.24.0",
     "husky": "^9.1.7",
