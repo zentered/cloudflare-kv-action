@@ -4,6 +4,8 @@ import kv from '../cloudflare.js'
 
 // --- Unit tests (always run, fetch is mocked) ---
 
+const originalFetch = globalThis.fetch
+
 describe('unit: auth headers', () => {
   let capturedRequest
 
@@ -15,7 +17,7 @@ describe('unit: auth headers', () => {
   })
 
   after(() => {
-    delete globalThis.fetch
+    globalThis.fetch = originalFetch
   })
 
   it('uses Bearer token when no email provided', async () => {
@@ -49,7 +51,7 @@ describe('unit: expiration params', () => {
   })
 
   after(() => {
-    delete globalThis.fetch
+    globalThis.fetch = originalFetch
   })
 
   it('appends expiration_ttl query param', async () => {
@@ -89,7 +91,7 @@ describe('unit: GET response parsing', () => {
     })
     const result = await kv('acct', '', 'tok', 'ns', 'key')
     assert.deepEqual(result, { hello: 'world' })
-    delete globalThis.fetch
+    globalThis.fetch = originalFetch
   })
 
   it('returns plain text when response is not valid JSON', async () => {
@@ -99,7 +101,7 @@ describe('unit: GET response parsing', () => {
     })
     const result = await kv('acct', '', 'tok', 'ns', 'key')
     assert.equal(result, 'plain text value')
-    delete globalThis.fetch
+    globalThis.fetch = originalFetch
   })
 
   it('returns null for JSON null value', async () => {
@@ -109,7 +111,7 @@ describe('unit: GET response parsing', () => {
     })
     const result = await kv('acct', '', 'tok', 'ns', 'key')
     assert.equal(result, null)
-    delete globalThis.fetch
+    globalThis.fetch = originalFetch
   })
 })
 
@@ -122,7 +124,7 @@ describe('unit: object value serialization', () => {
     }
     await kv('acct', '', 'tok', 'ns', 'key', { hello: 'world' })
     assert.equal(capturedBody, '{"hello":"world"}')
-    delete globalThis.fetch
+    globalThis.fetch = originalFetch
   })
 })
 
@@ -138,7 +140,7 @@ describe('unit: error handling', () => {
       () => kv('acct', '', 'tok', 'ns', 'key', 'val'),
       /PUT failed: 403 Forbidden/
     )
-    delete globalThis.fetch
+    globalThis.fetch = originalFetch
   })
 
   it('throws on GET failure', async () => {
@@ -152,7 +154,7 @@ describe('unit: error handling', () => {
       () => kv('acct', '', 'tok', 'ns', 'key'),
       /GET failed: 404 Not Found/
     )
-    delete globalThis.fetch
+    globalThis.fetch = originalFetch
   })
 
   it('includes error body in PUT failure message', async () => {
@@ -167,7 +169,7 @@ describe('unit: error handling', () => {
       () => kv('acct', '', 'tok', 'ns', 'key', 'val'),
       /PUT failed: 401 Unauthorized — \{"errors"/
     )
-    delete globalThis.fetch
+    globalThis.fetch = originalFetch
   })
 
   it('includes error body in GET failure message', async () => {
@@ -182,7 +184,7 @@ describe('unit: error handling', () => {
       () => kv('acct', '', 'tok', 'ns', 'key'),
       /GET failed: 401 Unauthorized — \{"errors"/
     )
-    delete globalThis.fetch
+    globalThis.fetch = originalFetch
   })
 })
 

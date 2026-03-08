@@ -33093,12 +33093,11 @@ async function get(kvUrl, headers) {
     )
   }
 
-  const data = await response.text()
+  const text = await response.text()
   try {
-    return JSON.parse(data)
-  } catch (err) {
-    if (!(err instanceof SyntaxError)) throw err
-    return data
+    return JSON.parse(text)
+  } catch {
+    return text
   }
 }
 
