@@ -25,4 +25,4 @@ outputs:
     description: 'Value from KV store'
 runs:
   main: dist/index.js
-  using: node16
+  using: node24

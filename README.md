@@ -13,30 +13,36 @@ Put and get values from Cloudflare KV.
 - [Environment Variables](#environment-variables--secret)
 - [Inputs](#inputs)
 - [Outputs](#outputs)
+- [Development](#development)
 
 ## Usage
 
-[Copy your "Global API Key"](https://dash.cloudflare.com/profile/api-tokens)
+### Bearer Token (recommended)
 
-Cloudflare needs a little time to build the preview, you can check the average
-build time in your deployments and add the seconds plus a little to a `sleep`
-action, to wait until the deployment is ready. The action only works on
-branches, so make sure you exclude the `main` branch from the trigger:
+Create an [API Token](https://dash.cloudflare.com/profile/api-tokens) with
+Workers KV Storage permissions.
 
 ```yaml
-on:
-  push:
-    branches:
-      - '**'
-      - '!main'
+- name: cloudflare-kv-action
+  uses: zentered/cloudflare-kv-action@v2
+  id: cloudflare_kv
+  env:
+    CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  with:
+    namespace_identifier: '123'
+    key_name: 'hello'
+    value: 'world'
+    expiration_ttl: 120
+- name: Value
+  run: echo "${{ steps.cloudflare_kv.outputs.value }}"
 ```
 
-Here are the steps for an example job:
+### Legacy Auth (API Key + Email)
 
 ```yaml
-- run: sleep 30
 - name: cloudflare-kv-action
-  uses: zentered/cloudflare-kv-action@v1.0.0
+  uses: zentered/cloudflare-kv-action@v2
   id: cloudflare_kv
   env:
     CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
@@ -53,26 +59,25 @@ Here are the steps for an example job:
 
 ## Environment Variables / Secret
 
-In the repository, go to "Settings", then "Secrets" and add
-"CLOUDFLARE_API_TOKEN", the value you can retrieve on your
-[Cloudflare account](https://dash.cloudflare.com/profile/api-tokens). You also
-need to add:
+In the repository, go to "Settings", then "Secrets" and add your Cloudflare
+credentials. You can retrieve them on your
+[Cloudflare account](https://dash.cloudflare.com/profile/api-tokens).
 
-- `CLOUDFLARE_ACCOUNT_EMAIL` (your login email, optional)
-- `CLOUDFLARE_ACCOUNT_ID` (from the URL:
-  `https://dash.cloudflare.com/123abc....`)
-- `CLOUDFLARE_API_KEY` (from the URL:
-  `https://dash.cloudflare.com/profile/api-tokens`)
+| Variable                   | Required | Description                                            |
+| -------------------------- | -------- | ------------------------------------------------------ |
+| `CLOUDFLARE_ACCOUNT_ID`    | required | From the URL: `https://dash.cloudflare.com/123abc....` |
+| `CLOUDFLARE_API_KEY`       | required | API Token (Bearer) or Global API Key (legacy)          |
+| `CLOUDFLARE_ACCOUNT_EMAIL` | optional | Required only for legacy API Key auth                  |
 
 ## Inputs
 
-| Name                   | Requirement | Description                                                                                                                                                               |
-| ---------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `namespace_identifier` | required    | Cloudflare namespace ID                                                                                                                                                   |
-| `key_name`             | required    | KV key name                                                                                                                                                               |
-| `value`                | optional    | Optional: Use "value" to set a key, otherwise it will be retrieved                                                                                                        |
-| `expiration`           | optional    | Optional: expiration                                                                                                                                                      |
-| `expiration_ttl`       | optional    | Optional: If neither expiration nor expiration_ttl is specified, the key-value pair will never expire. If both are set, expiration_ttl is used and expiration is ignored. |
+| Name                   | Requirement | Description                                                                                                       |
+| ---------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------- |
+| `namespace_identifier` | required    | Cloudflare namespace ID                                                                                           |
+| `key_name`             | required    | KV key name                                                                                                       |
+| `value`                | optional    | Use "value" to set a key; omit to retrieve the current value                                                      |
+| `expiration`           | optional    | Absolute expiration (Unix timestamp)                                                                              |
+| `expiration_ttl`       | optional    | Relative expiration in seconds. If both `expiration` and `expiration_ttl` are set, `expiration` takes precedence. |
 
 [Cloudflare API Reference](https://api.cloudflare.com/#workers-kv-namespace-write-key-value-pair)
 
@@ -81,6 +86,27 @@ need to add:
 | Name    | Description |
 | ------- | ----------- |
 | `value` | KV value    |
+
+## Development
+
+Requirements: Node >= 20
+
+```bash
+# Install dependencies
+npm install
+
+# Copy and fill in your Cloudflare credentials
+cp .env.example .env
+
+# Run linter
+npm run lint
+
+# Run tests (unit tests run without credentials; integration tests require .env)
+npm test
+
+# Rebuild dist/ after code changes
+npm run prepare
+```
 
 ## Contributing
 

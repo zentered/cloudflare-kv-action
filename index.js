@@ -1,4 +1,4 @@
-import core from '@actions/core'
+import * as core from '@actions/core'
 import kv from './cloudflare.js'
 
 async function run() {
@@ -24,7 +24,7 @@ async function run() {
       expirationTtl
     )
 
-    if (returnValue) {
+    if (returnValue !== null && returnValue !== undefined) {
       core.setOutput('value', returnValue)
     }
   } catch (error) {
