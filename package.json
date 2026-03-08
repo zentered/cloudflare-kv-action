@@ -55,11 +55,11 @@
     "@actions/core": "^3.0.0"
   },
   "devDependencies": {
-    "@commitlint/config-conventional": "^19.0.0",
-    "@eslint/js": "^9.39.3",
+    "@commitlint/config-conventional": "^20.4.3",
+    "@eslint/js": "^9.39.4",
     "@vercel/ncc": "^0.38.4",
-    "commitlint": "^19.0.0",
-    "eslint": "^9.39.3",
+    "commitlint": "^20.4.3",
+    "eslint": "^9.39.4",
     "eslint-plugin-json": "^4.0.1",
     "eslint-plugin-n": "^17.24.0",
     "husky": "^9.1.7",
