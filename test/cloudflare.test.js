@@ -188,27 +188,36 @@ describe('unit: error handling', () => {
   })
 })
 
-// --- Integration tests (skipped when credentials absent) ---
+// --- End-to-end tests (mocked fetch, full PUT→GET flow) ---
 
-const hasCredentials =
-  process.env.CLOUDFLARE_ACCOUNT_ID &&
-  process.env.CLOUDFLARE_API_KEY &&
-  process.env.CLOUDFLARE_NAMESPACE_IDENTIFIER
+describe('e2e: put and get', () => {
+  const store = {}
 
-describe('integration', { skip: !hasCredentials }, () => {
-  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID
-  const apiKey = process.env.CLOUDFLARE_API_KEY
-  const accountEmail = process.env.CLOUDFLARE_ACCOUNT_EMAIL
-  const namespaceId = process.env.CLOUDFLARE_NAMESPACE_IDENTIFIER
-  const key = 'cloudflare-kv-test-key'
+  before(() => {
+    globalThis.fetch = async (url, init) => {
+      const key = new URL(url).pathname.split('/').pop()
+      if (init && init.method === 'PUT') {
+        store[key] = init.body
+        return { ok: true, text: async () => 'null' }
+      }
+      return {
+        ok: true,
+        text: async () => store[key] || ''
+      }
+    }
+  })
+
+  after(() => {
+    globalThis.fetch = originalFetch
+  })
 
   it('put', async () => {
     const result = await kv(
-      accountId,
-      accountEmail,
-      apiKey,
-      namespaceId,
-      key,
+      'acct',
+      '',
+      'tok',
+      'ns',
+      'test-key',
       { hello: 'world' },
       null,
       120
@@ -217,7 +226,7 @@ describe('integration', { skip: !hasCredentials }, () => {
   })
 
   it('get', async () => {
-    const result = await kv(accountId, accountEmail, apiKey, namespaceId, key)
+    const result = await kv('acct', '', 'tok', 'ns', 'test-key')
     assert.deepEqual(result, { hello: 'world' })
   })
 })
