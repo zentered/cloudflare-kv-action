@@ -3116,6 +3116,26 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
       [kSecureProxyConnectionError] = true
     }
 
+    const kMessageSizeExceededError = Symbol.for(
+      'undici.error.UND_ERR_WS_MESSAGE_SIZE_EXCEEDED'
+    )
+    class MessageSizeExceededError extends UndiciError {
+      constructor(message) {
+        super(message)
+        this.name = 'MessageSizeExceededError'
+        this.message = message || 'Max decompressed message size exceeded'
+        this.code = 'UND_ERR_WS_MESSAGE_SIZE_EXCEEDED'
+      }
+
+      static [Symbol.hasInstance](instance) {
+        return instance && instance[kMessageSizeExceededError] === true
+      }
+
+      get [kMessageSizeExceededError]() {
+        return true
+      }
+    }
+
     module.exports = {
       AbortError,
       HTTPParserError,
@@ -3139,7 +3159,8 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
       ResponseExceededMaxSizeError,
       RequestRetryError,
       ResponseError,
-      SecureProxyConnectionError
+      SecureProxyConnectionError,
+      MessageSizeExceededError
     }
 
     /***/
@@ -3217,6 +3238,10 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
 
         if (upgrade && typeof upgrade !== 'string') {
           throw new InvalidArgumentError('upgrade must be a string')
+        }
+
+        if (upgrade && !isValidHeaderValue(upgrade)) {
+          throw new InvalidArgumentError('invalid upgrade header')
         }
 
         if (
@@ -3439,11 +3464,84 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
         }
       }
 
-      onUpgrade(statusCode, headers, socket) {
+      /**
+       * @param {number|null} statusCode
+       * @param {Buffer[]|null} headers
+       * @param {import('node:stream').Duplex} socket
+       * @param {string} [statusText]
+       */
+      onUpgrade(statusCode, headers, socket, statusText = '') {
+        this.onFinally()
+
         assert(!this.aborted)
         assert(!this.completed)
 
-        return this[kHandler].onUpgrade(statusCode, headers, socket)
+        if (statusCode !== null) {
+          this.#publishUpgradeHeaders(statusCode, headers, statusText)
+        }
+
+        const result = this[kHandler].onUpgrade(statusCode, headers, socket)
+
+        if (!this.aborted) {
+          this.completed = true
+          if (statusCode !== null) {
+            this.#publishUpgradeTrailers()
+          }
+        }
+
+        return result
+      }
+
+      /**
+       * @param {number} statusCode
+       * @param {import('node:http2').IncomingHttpHeaders} headers
+       * @param {(headers: import('node:http2').IncomingHttpHeaders) => Buffer[]} parseHeaders
+       * @param {string} [statusText]
+       */
+      onUpgradeResponse(statusCode, headers, parseHeaders, statusText = '') {
+        assert(!this.aborted)
+        assert(this.completed)
+
+        if (channels.headers.hasSubscribers) {
+          this.#publishUpgradeHeaders(
+            statusCode,
+            parseHeaders(headers),
+            statusText
+          )
+        }
+        this.#publishUpgradeTrailers()
+      }
+
+      /**
+       * @param {Error} error
+       */
+      onUpgradeError(error) {
+        assert(!this.aborted)
+        assert(this.completed)
+
+        if (channels.error.hasSubscribers) {
+          channels.error.publish({ request: this, error })
+        }
+      }
+
+      /**
+       * @param {number} statusCode
+       * @param {Buffer[]} headers
+       * @param {string} statusText
+       */
+      #publishUpgradeHeaders(statusCode, headers, statusText) {
+        if (channels.headers.hasSubscribers) {
+          channels.headers.publish({
+            request: this,
+            response: { statusCode, headers, statusText }
+          })
+        }
+      }
+
+      #publishUpgradeTrailers() {
+        if (channels.trailers.hasSubscribers) {
+          channels.trailers.publish({ request: this, trailers: [] })
+        }
       }
 
       onComplete(trailers) {
@@ -3529,7 +3627,13 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
           } else if (typeof val[i] === 'object') {
             throw new InvalidArgumentError(`invalid ${key} header`)
           } else {
-            arr.push(`${val[i]}`)
+            // Coerce primitives (and reject unsafe coercions such as functions
+            // with a crafted toString/Symbol.toPrimitive).
+            const str = `${val[i]}`
+            if (!isValidHeaderValue(str)) {
+              throw new InvalidArgumentError(`invalid ${key} header`)
+            }
+            arr.push(str)
           }
         }
         val = arr
@@ -3540,19 +3644,27 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
       } else if (val === null) {
         val = ''
       } else {
+        // Coerce primitives (and reject unsafe coercions such as functions
+        // with a crafted toString/Symbol.toPrimitive).
         val = `${val}`
+        if (!isValidHeaderValue(val)) {
+          throw new InvalidArgumentError(`invalid ${key} header`)
+        }
       }
 
-      if (request.host === null && headerName === 'host') {
+      if (headerName === 'host') {
+        if (request.host !== null) {
+          throw new InvalidArgumentError('duplicate host header')
+        }
         if (typeof val !== 'string') {
           throw new InvalidArgumentError('invalid host header')
         }
         // Consumed by Client
         request.host = val
-      } else if (
-        request.contentLength === null &&
-        headerName === 'content-length'
-      ) {
+      } else if (headerName === 'content-length') {
+        if (request.contentLength !== null) {
+          throw new InvalidArgumentError('duplicate content-length header')
+        }
         request.contentLength = parseInt(val, 10)
         if (!Number.isFinite(request.contentLength)) {
           throw new InvalidArgumentError('invalid content-length header')
@@ -4621,10 +4733,9 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
         factory = defaultFactory,
         maxRedirections = 0,
         connect,
+        tls,
         ...options
       } = {}) {
-        super()
-
         if (typeof factory !== 'function') {
           throw new InvalidArgumentError('factory must be a function.')
         }
@@ -4645,8 +4756,14 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
           )
         }
 
+        super(options)
+
         if (connect && typeof connect !== 'function') {
           connect = { ...connect }
+        }
+
+        if (tls && typeof tls !== 'function') {
+          tls = { ...tls }
         }
 
         this[kInterceptors] =
@@ -4655,7 +4772,7 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
             ? options.interceptors.Agent
             : [createRedirectInterceptor({ maxRedirections })]
 
-        this[kOptions] = { ...util.deepClone(options), connect }
+        this[kOptions] = { ...util.deepClone(options), connect, tls }
         this[kOptions].interceptors = options.interceptors
           ? { ...options.interceptors }
           : undefined
@@ -4990,6 +5107,7 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
       RequestContentLengthMismatchError,
       ResponseContentLengthMismatchError,
       RequestAbortedError,
+      InvalidArgumentError,
       HeadersTimeoutError,
       HeadersOverflowError,
       SocketError,
@@ -5037,6 +5155,9 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
     const FastBuffer = Buffer[Symbol.species]
     const addListener = util.addListener
     const removeAllListeners = util.removeAllListeners
+    const kIdleSocketValidation = Symbol('kIdleSocketValidation')
+    const kIdleSocketValidationTimeout = Symbol('kIdleSocketValidationTimeout')
+    const kSocketUsed = Symbol('kSocketUsed')
 
     let extractBody
 
@@ -5306,31 +5427,72 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
           const offset =
             llhttp.llhttp_get_error_pos(this.ptr) - currentBufferPtr
 
-          if (ret === constants.ERROR.PAUSED_UPGRADE) {
-            this.onUpgrade(data.slice(offset))
-          } else if (ret === constants.ERROR.PAUSED) {
-            this.paused = true
-            socket.unshift(data.slice(offset))
-          } else if (ret !== constants.ERROR.OK) {
-            const ptr = llhttp.llhttp_get_error_reason(this.ptr)
-            let message = ''
-            /* istanbul ignore else: difficult to make a test case for */
-            if (ptr) {
-              const len = new Uint8Array(llhttp.memory.buffer, ptr).indexOf(0)
-              message =
-                'Response does not match the HTTP/1.1 protocol (' +
-                Buffer.from(llhttp.memory.buffer, ptr, len).toString() +
-                ')'
+          if (ret !== constants.ERROR.OK) {
+            const body = data.subarray(offset)
+
+            if (ret === constants.ERROR.PAUSED_UPGRADE) {
+              this.onUpgrade(body)
+            } else if (ret === constants.ERROR.PAUSED) {
+              this.paused = true
+              socket.unshift(body)
+            } else {
+              throw this.createError(ret, body)
             }
-            throw new HTTPParserError(
-              message,
-              constants.ERROR[ret],
-              data.slice(offset)
-            )
           }
         } catch (err) {
           util.destroy(socket, err)
         }
+      }
+
+      finish() {
+        assert(currentParser === null)
+        assert(this.ptr != null)
+        assert(!this.paused)
+
+        const { llhttp } = this
+
+        let ret
+
+        try {
+          currentParser = this
+          ret = llhttp.llhttp_finish(this.ptr)
+        } finally {
+          currentParser = null
+        }
+
+        if (ret === constants.ERROR.OK) {
+          return null
+        }
+
+        if (
+          ret === constants.ERROR.PAUSED ||
+          ret === constants.ERROR.PAUSED_UPGRADE
+        ) {
+          this.paused = true
+          return null
+        }
+
+        return this.createError(ret, EMPTY_BUF)
+      }
+
+      createError(ret, data) {
+        const { llhttp, contentLength, bytesRead } = this
+
+        if (contentLength && bytesRead !== parseInt(contentLength, 10)) {
+          return new ResponseContentLengthMismatchError()
+        }
+
+        const ptr = llhttp.llhttp_get_error_reason(this.ptr)
+        let message = ''
+        if (ptr) {
+          const len = new Uint8Array(llhttp.memory.buffer, ptr).indexOf(0)
+          message =
+            'Response does not match the HTTP/1.1 protocol (' +
+            Buffer.from(llhttp.memory.buffer, ptr, len).toString() +
+            ')'
+        }
+
+        return new HTTPParserError(message, constants.ERROR[ret], data)
       }
 
       destroy() {
@@ -5357,6 +5519,14 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
 
         /* istanbul ignore next: difficult to make a test case for */
         if (socket.destroyed) {
+          return -1
+        }
+
+        if (client[kRunning] === 0) {
+          util.destroy(
+            socket,
+            new SocketError('bad response', util.getSocketInfo(socket))
+          )
           return -1
         }
 
@@ -5415,7 +5585,8 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
       }
 
       onUpgrade(head) {
-        const { upgrade, client, socket, headers, statusCode } = this
+        const { upgrade, client, socket, headers, statusCode, statusText } =
+          this
 
         assert(upgrade)
         assert(client[kSocket] === socket)
@@ -5455,9 +5626,10 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
         )
 
         try {
-          request.onUpgrade(statusCode, headers, socket)
-        } catch (err) {
-          util.destroy(socket, err)
+          request.onUpgrade(statusCode, headers, socket, statusText)
+        } catch (error) {
+          util.errorRequest(client, request, error)
+          util.destroy(socket, error)
         }
 
         client[kResume]()
@@ -5468,6 +5640,14 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
 
         /* istanbul ignore next: difficult to make a test case for */
         if (socket.destroyed) {
+          return -1
+        }
+
+        if (client[kRunning] === 0) {
+          util.destroy(
+            socket,
+            new SocketError('bad response', util.getSocketInfo(socket))
+          )
           return -1
         }
 
@@ -5672,6 +5852,7 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
         request.onComplete(headers)
 
         client[kQueue][client[kRunningIdx]++] = null
+        socket[kSocketUsed] = true
 
         if (socket[kWriting]) {
           assert(client[kRunning] === 0)
@@ -5734,11 +5915,12 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
       socket[kWriting] = false
       socket[kReset] = false
       socket[kBlocking] = false
+      socket[kIdleSocketValidation] = 0
+      socket[kIdleSocketValidationTimeout] = null
+      socket[kSocketUsed] = false
       socket[kParser] = new Parser(client, socket, llhttpInstance)
 
       addListener(socket, 'error', function (err) {
-        assert(err.code !== 'ERR_TLS_CERT_ALTNAME_INVALID')
-
         const parser = this[kParser]
 
         // On Mac OS, we get an ECONNRESET even if there is a full body to be forwarded
@@ -5748,8 +5930,11 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
           parser.statusCode &&
           !parser.shouldKeepAlive
         ) {
-          // We treat all incoming data so for as a valid response.
-          parser.onMessageComplete()
+          const parserErr = parser.finish()
+          if (parserErr) {
+            this[kError] = parserErr
+            this[kClient][kOnError](parserErr)
+          }
           return
         }
 
@@ -5768,8 +5953,10 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
         const parser = this[kParser]
 
         if (parser.statusCode && !parser.shouldKeepAlive) {
-          // We treat all incoming data so far as a valid response.
-          parser.onMessageComplete()
+          const parserErr = parser.finish()
+          if (parserErr) {
+            util.destroy(this, parserErr)
+          }
           return
         }
 
@@ -5782,10 +5969,11 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
         const client = this[kClient]
         const parser = this[kParser]
 
+        clearIdleSocketValidation(this)
+
         if (parser) {
           if (!this[kError] && parser.statusCode && !parser.shouldKeepAlive) {
-            // We treat all incoming data so far as a valid response.
-            parser.onMessageComplete()
+            this[kError] = parser.finish() || this[kError]
           }
 
           this[kParser].destroy()
@@ -5849,7 +6037,12 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
           return socket.destroyed
         },
         busy(request) {
-          if (socket[kWriting] || socket[kReset] || socket[kBlocking]) {
+          if (
+            socket[kWriting] ||
+            socket[kReset] ||
+            socket[kBlocking] ||
+            socket[kIdleSocketValidation] === 1
+          ) {
             return true
           }
 
@@ -5895,6 +6088,39 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
       }
     }
 
+    function clearIdleSocketValidation(socket) {
+      if (socket[kIdleSocketValidationTimeout]) {
+        clearImmediate(socket[kIdleSocketValidationTimeout])
+        socket[kIdleSocketValidationTimeout] = null
+      }
+
+      socket[kIdleSocketValidation] = 0
+    }
+
+    function scheduleIdleSocketValidation(client, socket) {
+      socket[kIdleSocketValidation] = 1
+      // Yield to the check phase (after poll) so unsolicited bytes / FIN / RST
+      // already pending on this idle keep-alive socket are processed before the
+      // next request is written (GHSA-35p6-xmwp-9g52).
+      //
+      // setTimeout(0) pays Node's ~1ms timer floor on every sequential reuse
+      // (#5493). setImmediate avoids that, but an *unref'd* Immediate lets poll
+      // block for ~500ms when the event loop is otherwise idle (#5600 / #5606).
+      // A ref'd Immediate both keeps the pending request alive and makes poll
+      // return immediately — the hybrid those issues asked for.
+      socket[kIdleSocketValidationTimeout] = setImmediate(() => {
+        socket[kIdleSocketValidationTimeout] = null
+        socket[kIdleSocketValidation] = 2
+
+        if (client[kSocket] === socket && !socket.destroyed) {
+          client[kResume]()
+        }
+      })
+    }
+
+    /**
+     * @param {import('./client.js')} client
+     */
     function resumeH1(client) {
       const socket = client[kSocket]
 
@@ -5907,6 +6133,36 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
         } else if (socket[kNoRef] && socket.ref) {
           socket.ref()
           socket[kNoRef] = false
+        }
+
+        if (
+          client[kRunning] === 0 &&
+          client[kPending] > 0 &&
+          socket[kSocketUsed]
+        ) {
+          if (socket[kIdleSocketValidation] === 0) {
+            scheduleIdleSocketValidation(client, socket)
+            socket[kParser].readMore()
+            if (socket.destroyed) {
+              return
+            }
+            return
+          }
+
+          if (socket[kIdleSocketValidation] === 1) {
+            socket[kParser].readMore()
+            if (socket.destroyed) {
+              return
+            }
+            return
+          }
+        }
+
+        if (client[kRunning] === 0) {
+          socket[kParser].readMore()
+          if (socket.destroyed) {
+            return
+          }
         }
 
         if (client[kSize] === 0) {
@@ -5973,12 +6229,20 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
         }
         body = bodyStream.stream
         contentLength = bodyStream.length
-      } else if (
-        util.isBlobLike(body) &&
-        request.contentType == null &&
-        body.type
-      ) {
-        headers.push('content-type', body.type)
+      } else if (util.isBlobLike(body) && request.contentType == null) {
+        const contentType = body.type
+        if (contentType) {
+          const contentTypeValue = `${contentType}`
+          if (!util.isValidHeaderValue(contentTypeValue)) {
+            util.errorRequest(
+              client,
+              request,
+              new InvalidArgumentError('invalid content-type header')
+            )
+            return false
+          }
+          headers.push('content-type', contentTypeValue)
+        }
       }
 
       if (body && typeof body.read === 'function') {
@@ -6024,13 +6288,24 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
       }
 
       const socket = client[kSocket]
+      clearIdleSocketValidation(socket)
 
-      const abort = (err) => {
-        if (request.aborted || request.completed) {
+      /**
+       * @param {Error} [error]
+       */
+      const abort = (error) => {
+        if (request.aborted) {
           return
         }
 
-        util.errorRequest(client, request, err || new RequestAbortedError())
+        if (request.completed) {
+          if (request.upgrade || request.method === 'CONNECT') {
+            util.destroy(socket, new InformationalError('aborted'))
+          }
+          return
+        }
+
+        util.errorRequest(client, request, error || new RequestAbortedError())
 
         util.destroy(body)
         util.destroy(socket, new InformationalError('aborted'))
@@ -6636,6 +6911,7 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
 
   /***/ 8788: /***/ (module, __unused_webpack_exports, __nccwpck_require__) => {
     const assert = __nccwpck_require__(4589)
+    const { errorMonitor } = __nccwpck_require__(8474)
     const { pipeline } = __nccwpck_require__(7075)
     const util = __nccwpck_require__(3440)
     const {
@@ -6712,6 +6988,15 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
       return result
     }
 
+    /**
+     * @param {import('node:http2').IncomingHttpHeaders} headers
+     * @returns {Buffer[]}
+     */
+    function parseH2ResponseHeaders(headers) {
+      const { [HTTP2_HEADER_STATUS]: _statusCode, ...realHeaders } = headers
+      return parseH2Headers(realHeaders)
+    }
+
     async function connectH2(client, socket) {
       client[kSocket] = socket
 
@@ -6767,8 +7052,6 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
       socket[kHTTP2Session] = session
 
       util.addListener(socket, 'error', function (err) {
-        assert(err.code !== 'ERR_TLS_CERT_ALTNAME_INVALID')
-
         this[kError] = err
 
         this[kClient][kOnError](err)
@@ -6846,8 +7129,6 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
     }
 
     function onHttp2SessionError(err) {
-      assert(err.code !== 'ERR_TLS_CERT_ALTNAME_INVALID')
-
       this[kSocket][kError] = err
       this[kClient][kOnError](err)
     }
@@ -6971,22 +7252,32 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
         host || `${hostname}${port ? `:${port}` : ''}`
       headers[HTTP2_HEADER_METHOD] = method
 
-      const abort = (err) => {
-        if (request.aborted || request.completed) {
+      /**
+       * @param {Error} [error]
+       */
+      const abort = (error) => {
+        if (request.aborted) {
           return
         }
 
-        err = err || new RequestAbortedError()
+        if (request.completed) {
+          if (method === 'CONNECT' && stream != null) {
+            util.destroy(stream, error || new RequestAbortedError())
+          }
+          return
+        }
 
-        util.errorRequest(client, request, err)
+        error = error || new RequestAbortedError()
+
+        util.errorRequest(client, request, error)
 
         if (stream != null) {
-          util.destroy(stream, err)
+          util.destroy(stream, error)
         }
 
         // We do not destroy the socket as we can continue using the session
         // the stream get's destroyed and the session remains to create new streams
-        util.destroy(body, err)
+        util.destroy(body, error)
         client[kQueue][client[kRunningIdx]++] = null
         client[kResume]()
       }
@@ -7005,25 +7296,65 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
 
       if (method === 'CONNECT') {
         session.ref()
-        // We are already connected, streams are pending, first request
-        // will create a new stream. We trigger a request to create the stream and wait until
-        // `ready` event is triggered
         // We disabled endStream to allow the user to write to the stream
         stream = session.request(headers, { endStream: false, signal })
+        let upgradeResponseFinished = false
 
-        if (stream.id && !stream.pending) {
-          request.onUpgrade(null, null, stream)
-          ++session[kOpenStreams]
-          client[kQueue][client[kRunningIdx]++] = null
-        } else {
-          stream.once('ready', () => {
-            request.onUpgrade(null, null, stream)
-            ++session[kOpenStreams]
-            client[kQueue][client[kRunningIdx]++] = null
-          })
+        /**
+         * @param {import('node:http2').IncomingHttpHeaders} headers
+         */
+        const onResponse = (headers) => {
+          upgradeResponseFinished = true
+          stream.off(errorMonitor, onUpgradeError)
+          request.onUpgradeResponse(
+            Number(headers[HTTP2_HEADER_STATUS]),
+            headers,
+            parseH2ResponseHeaders
+          )
         }
 
+        /**
+         * @param {Error} error
+         */
+        const onUpgradeError = (error) => {
+          upgradeResponseFinished = true
+          stream.off('response', onResponse)
+          request.onUpgradeError(error)
+        }
+
+        const onReady = () => {
+          try {
+            request.onUpgrade(null, null, stream)
+          } catch (error) {
+            stream.off('response', onResponse)
+            abort(error)
+            return
+          }
+
+          if (request.aborted) {
+            return
+          }
+
+          stream.off('error', abort)
+          stream.once(errorMonitor, onUpgradeError)
+          client[kQueue][client[kRunningIdx]++] = null
+        }
+
+        stream.once('response', onResponse)
+        stream.once('error', abort)
+        ++session[kOpenStreams]
+        onReady()
+
         stream.once('close', () => {
+          if (!upgradeResponseFinished && request.completed) {
+            stream.off('response', onResponse)
+            stream.off(errorMonitor, onUpgradeError)
+            request.onUpgradeError(
+              new InformationalError(
+                `HTTP/2: "stream error" received - code ${stream.rstCode}`
+              )
+            )
+          }
           session[kOpenStreams] -= 1
           if (session[kOpenStreams] === 0) session.unref()
         })
@@ -7585,10 +7916,12 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
           autoSelectFamilyAttemptTimeout,
           // h2
           maxConcurrentStreams,
-          allowH2
+          allowH2,
+          webSocket,
+          eventSource
         } = {}
       ) {
-        super()
+        super({ webSocket, eventSource })
 
         if (keepAlive !== undefined) {
           throw new InvalidArgumentError(
@@ -8205,6 +8538,7 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
   },
 
   /***/ 1841: /***/ (module, __unused_webpack_exports, __nccwpck_require__) => {
+    const buffer = __nccwpck_require__(4573)
     const Dispatcher = __nccwpck_require__(883)
     const { ClientDestroyedError, ClientClosedError, InvalidArgumentError } =
       __nccwpck_require__(8707)
@@ -8214,15 +8548,34 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
     const kOnDestroyed = Symbol('onDestroyed')
     const kOnClosed = Symbol('onClosed')
     const kInterceptedDispatch = Symbol('Intercepted Dispatch')
+    const kWebSocketOptions = Symbol('webSocketOptions')
+    const kEventSourceOptions = Symbol('eventSourceOptions')
 
     class DispatcherBase extends Dispatcher {
-      constructor() {
+      constructor(opts) {
         super()
 
         this[kDestroyed] = false
         this[kOnDestroyed] = null
         this[kClosed] = false
         this[kOnClosed] = []
+        this[kWebSocketOptions] = opts?.webSocket ?? {}
+        this[kEventSourceOptions] = opts?.eventSource ?? {}
+      }
+
+      get webSocketOptions() {
+        return {
+          maxFragments: this[kWebSocketOptions].maxFragments ?? 131072,
+          maxPayloadSize:
+            this[kWebSocketOptions].maxPayloadSize ?? 128 * 1024 * 1024
+        }
+      }
+
+      get eventSourceOptions() {
+        return {
+          maxEventSize:
+            this[kEventSourceOptions].maxEventSize ?? buffer.kStringMaxLength
+        }
       }
 
       get destroyed() {
@@ -8806,8 +9159,8 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
     const kStats = Symbol('stats')
 
     class PoolBase extends DispatcherBase {
-      constructor() {
-        super()
+      constructor(opts) {
+        super(opts)
 
         this[kQueue] = new FixedQueue()
         this[kClients] = []
@@ -9060,8 +9413,6 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
           ...options
         } = {}
       ) {
-        super()
-
         if (
           connections != null &&
           (!Number.isFinite(connections) || connections < 0)
@@ -9096,6 +9447,8 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
             ...connect
           })
         }
+
+        super(options)
 
         this[kInterceptors] =
           options.interceptors?.Pool && Array.isArray(options.interceptors.Pool)
@@ -9863,6 +10216,33 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
       return new Date(retryAfter).getTime() - current
     }
 
+    function validatePartialResponseContentLength(
+      headers,
+      range,
+      statusCode,
+      retryCount
+    ) {
+      const contentLength = headers['content-length']
+      if (contentLength == null) {
+        return null
+      }
+
+      if (!Number.isFinite(range.start) || !Number.isFinite(range.end)) {
+        return null
+      }
+
+      const length = Number(contentLength)
+      const expectedLength = range.end - range.start + 1
+      if (!Number.isFinite(length) || length !== expectedLength) {
+        return new RequestRetryError('Content-Length mismatch', statusCode, {
+          headers,
+          data: { count: retryCount }
+        })
+      }
+
+      return null
+    }
+
     class RetryHandler {
       constructor(opts, handlers) {
         const { retryOptions, ...dispatchOpts } = opts
@@ -9923,6 +10303,7 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
         this.end = null
         this.etag = null
         this.resume = null
+        this.headersSent = false
 
         // Handle possible onConnect duplication
         this.handler.onConnect((reason) => {
@@ -9933,6 +10314,20 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
             this.reason = reason
           }
         })
+      }
+
+      checkpointResponseEnd(headers, resume) {
+        if (this.end == null && this.opts.method !== 'HEAD') {
+          const contentLength = headers['content-length']
+          this.end = contentLength != null ? Number(contentLength) - 1 : null
+
+          assert(
+            this.end == null || Number.isFinite(this.end),
+            'invalid content-length'
+          )
+        }
+
+        this.resume = this.end != null ? resume : null
       }
 
       onRequestSent() {
@@ -10027,7 +10422,15 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
         this.retryCount += 1
 
         if (statusCode >= 300) {
-          if (this.retryOpts.statusCodes.includes(statusCode) === false) {
+          // Only expose a response if no earlier attempt has reached the caller.
+          // Otherwise abort this attempt so the error settles the existing body
+          // instead of replacing it with a new response.
+          if (
+            !this.headersSent &&
+            this.retryOpts.statusCodes.includes(statusCode) === false
+          ) {
+            this.headersSent = true
+            this.checkpointResponseEnd(headers, resume)
             return this.handler.onHeaders(
               statusCode,
               rawHeaders,
@@ -10092,10 +10495,28 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
             return false
           }
 
+          const contentLengthError = validatePartialResponseContentLength(
+            headers,
+            contentRange,
+            statusCode,
+            this.retryCount
+          )
+          if (contentLengthError != null) {
+            this.abort(contentLengthError)
+            return false
+          }
+
           const { start, size, end = size - 1 } = contentRange
 
-          assert(this.start === start, 'content-range mismatch')
-          assert(this.end == null || this.end === end, 'content-range mismatch')
+          if (this.start !== start || (this.end != null && this.end !== end)) {
+            this.abort(
+              new RequestRetryError('Content-Range mismatch', statusCode, {
+                headers,
+                data: { count: this.retryCount }
+              })
+            )
+            return false
+          }
 
           this.resume = resume
           return true
@@ -10107,12 +10528,24 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
             const range = parseRangeHeader(headers['content-range'])
 
             if (range == null) {
+              this.headersSent = true
               return this.handler.onHeaders(
                 statusCode,
                 rawHeaders,
                 resume,
                 statusMessage
               )
+            }
+
+            const contentLengthError = validatePartialResponseContentLength(
+              headers,
+              range,
+              statusCode,
+              this.retryCount
+            )
+            if (contentLengthError != null) {
+              this.abort(contentLengthError)
+              return false
             }
 
             const { start, size, end = size - 1 } = range
@@ -10142,6 +10575,7 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
           )
 
           this.resume = resume
+          this.headersSent = true
           this.etag = headers.etag != null ? headers.etag : null
 
           // Weak etags are not useful for comparison nor cache
@@ -10181,7 +10615,11 @@ import { createRequire as __WEBPACK_EXTERNAL_createRequire } from 'module'
       }
 
       onError(err) {
-        if (this.aborted || isDisturbed(this.opts.body)) {
+        if (
+          this.aborted ||
+          isDisturbed(this.opts.body) ||
+          (this.headersSent && this.resume == null)
+        ) {
           return this.handler.onError(err)
         }
 
@@ -14475,32 +14913,25 @@ ${pendingInterceptorsFormatter.format(pending)}
         // If the attribute-name case-insensitively matches the string
         // "SameSite", the user agent MUST process the cookie-av as follows:
 
-        // 1. Let enforcement be "Default".
-        let enforcement = 'Default'
-
         const attributeValueLowercase = attributeValue.toLowerCase()
-        // 2. If cookie-av's attribute-value is a case-insensitive match for
-        //    "None", set enforcement to "None".
-        if (attributeValueLowercase.includes('none')) {
-          enforcement = 'None'
-        }
 
-        // 3. If cookie-av's attribute-value is a case-insensitive match for
-        //    "Strict", set enforcement to "Strict".
-        if (attributeValueLowercase.includes('strict')) {
-          enforcement = 'Strict'
+        // 1. If cookie-av's attribute-value is a case-insensitive match for
+        //    "None", append an attribute to the cookie-attribute-list with an
+        //    attribute-name of "SameSite" and an attribute-value of "None".
+        if (attributeValueLowercase === 'none') {
+          cookieAttributeList.sameSite = 'None'
+        } else if (attributeValueLowercase === 'strict') {
+          // 2. If cookie-av's attribute-value is a case-insensitive match for
+          //    "Strict", append an attribute to the cookie-attribute-list with
+          //    an attribute-name of "SameSite" and an attribute-value of
+          //    "Strict".
+          cookieAttributeList.sameSite = 'Strict'
+        } else if (attributeValueLowercase === 'lax') {
+          // 3. If cookie-av's attribute-value is a case-insensitive match for
+          //    "Lax", append an attribute to the cookie-attribute-list with an
+          //    attribute-name of "SameSite" and an attribute-value of "Lax".
+          cookieAttributeList.sameSite = 'Lax'
         }
-
-        // 4. If cookie-av's attribute-value is a case-insensitive match for
-        //    "Lax", set enforcement to "Lax".
-        if (attributeValueLowercase.includes('lax')) {
-          enforcement = 'Lax'
-        }
-
-        // 5. Append an attribute to the cookie-attribute-list with an
-        //    attribute-name of "SameSite" and an attribute-value of
-        //    enforcement.
-        cookieAttributeList.sameSite = enforcement
       } else {
         cookieAttributeList.unparsed ??= []
 
@@ -14625,7 +15056,7 @@ ${pendingInterceptorsFormatter.format(pending)}
 
         if (
           code < 0x20 || // exclude CTLs (0-31)
-          code === 0x7f || // DEL
+          code > 0x7e || // exclude DEL and non-ascii
           code === 0x3b // ;
         ) {
           throw new Error('Invalid cookie path')
@@ -14634,16 +15065,83 @@ ${pendingInterceptorsFormatter.format(pending)}
     }
 
     /**
-     * I have no idea why these values aren't allowed to be honest,
-     * but Deno tests these. - Khafra
+     * <let-dig> ::= <letter> | <digit>
+     *
+     * <letter> ::= any one of the 52 alphabetic characters A through Z in
+     * upper case and a through z in lower case
+     *
+     * <digit> ::= any one of the ten digits 0 through 9r
+     *
+     * @see https://www.rfc-editor.org/rfc/rfc1034#section-3.5
+     * @param {number} code
+     */
+    function isLetterOrDigit(code) {
+      return (
+        (code >= 0x30 && code <= 0x39) || // 0-9
+        (code >= 0x41 && code <= 0x5a) || // A-Z
+        (code >= 0x61 && code <= 0x7a) // a-z
+      )
+    }
+
+    /**
+     * Validates a cookie domain against the "preferred name syntax".
+     *
+     * <domain>      ::= <subdomain> | " "
+     * <subdomain>   ::= <label> | <subdomain> "." <label>
+     * <label>       ::= <let-dig> [ [ <ldh-str> ] <let-dig> ]
+     * <ldh-str>     ::= <let-dig-hyp> | <let-dig-hyp> <ldh-str>
+     * <let-dig-hyp> ::= <let-dig> | "-"
+     *
+     * @see https://www.rfc-editor.org/rfc/rfc1034#section-3.5
+     * @see https://www.rfc-editor.org/rfc/rfc1123#section-2.1
+     * @see https://www.rfc-editor.org/rfc/rfc1035#section-2.3.4
      * @param {string} domain
      */
     function validateCookieDomain(domain) {
-      if (
-        domain.startsWith('-') ||
-        domain.endsWith('.') ||
-        domain.endsWith('-')
-      ) {
+      // <domain> ::= <subdomain> | " "
+      if (domain === ' ') {
+        return
+      }
+
+      if (domain.length > 255) {
+        throw new Error('Invalid cookie domain')
+      }
+
+      let labelLength = 0
+
+      for (let i = 0; i < domain.length; ++i) {
+        const code = domain.charCodeAt(i)
+
+        if (code === 0x2e) {
+          if (labelLength === 0) {
+            throw new Error('Invalid cookie domain')
+          }
+
+          if (domain.charCodeAt(i - 1) === 0x2d) {
+            // "-"
+            throw new Error('Invalid cookie domain')
+          }
+
+          labelLength = 0
+          continue
+        }
+
+        if (labelLength === 0 && !isLetterOrDigit(code)) {
+          throw new Error('Invalid cookie domain')
+        }
+
+        if (!isLetterOrDigit(code) && code !== 0x2d) {
+          // "-"
+          throw new Error('Invalid cookie domain')
+        }
+
+        if (++labelLength > 63) {
+          throw new Error('Invalid cookie domain')
+        }
+      }
+
+      if (labelLength === 0 || domain.charCodeAt(domain.length - 1) === 0x2d) {
+        // "-"
         throw new Error('Invalid cookie domain')
       }
     }
@@ -14795,7 +15293,13 @@ ${pendingInterceptorsFormatter.format(pending)}
 
         const [key, ...value] = part.split('=')
 
-        out.push(`${key.trim()}=${value.join('=')}`)
+        const trimmedKey = key.trim()
+        const joinedValue = value.join('=')
+
+        validateCookieName(trimmedKey)
+        validateCookieValue(joinedValue)
+
+        out.push(`${trimmedKey}=${joinedValue}`)
       }
 
       return out.join('; ')
@@ -14814,6 +15318,7 @@ ${pendingInterceptorsFormatter.format(pending)}
   },
 
   /***/ 4031: /***/ (module, __unused_webpack_exports, __nccwpck_require__) => {
+    const buffer = __nccwpck_require__(4573)
     const { Transform } = __nccwpck_require__(7075)
     const { isASCIINumber, isValidLastEventId } = __nccwpck_require__(4811)
 
@@ -14837,6 +15342,63 @@ ${pendingInterceptorsFormatter.format(pending)}
      * @type {32} SPACE
      */
     const SPACE = 0x20
+
+    const defaultMaxEventSize = buffer.kStringMaxLength
+
+    const DATA = Buffer.from('data')
+    const EVENT = Buffer.from('event')
+    const ID = Buffer.from('id')
+    const RETRY = Buffer.from('retry')
+
+    // Each data field creates a string node, and each unconsumed input chunk keeps
+    // a Buffer wrapper. The absolute ceiling protects the large default byte limit.
+    const minParserItems = 1024
+    const maxParserItems = 131072
+    const bytesPerParserItem = 128
+
+    function isASCIINumberBytes(buffer, start) {
+      if (start >= buffer.length) {
+        return false
+      }
+
+      for (let i = start; i < buffer.length; i++) {
+        if (buffer[i] < 0x30 || buffer[i] > 0x39) {
+          return false
+        }
+      }
+
+      return true
+    }
+
+    function isValidLastEventIdBytes(buffer, start) {
+      for (let i = start; i < buffer.length; i++) {
+        if (buffer[i] === 0x00) {
+          return false
+        }
+      }
+
+      return true
+    }
+
+    function isFieldName(line, length, field) {
+      if (length !== field.length) {
+        return false
+      }
+
+      for (let i = 0; i < length; i++) {
+        if (line[i] !== field[i]) {
+          return false
+        }
+      }
+
+      return true
+    }
+
+    function createMaxEventSizeExceededError() {
+      const error = new Error('EventSource message size exceeded')
+      error.aborted = false
+      return error
+    }
 
     /**
      * @typedef {object} EventSourceStreamEvent
@@ -14878,11 +15440,21 @@ ${pendingInterceptorsFormatter.format(pending)}
       eventEndCheck = false
 
       /**
-       * @type {Buffer}
+       * @type {Buffer[]}
        */
-      buffer = null
+      chunks = []
 
+      chunkIndex = 0
       pos = 0
+      lineChunkIndex = 0
+      linePos = 0
+      lineLength = 0
+      eventSize = 0
+      eventFieldSizes = { data: 0, event: 0, id: 0, retry: 0 }
+      dataLineCount = 0
+      maxEventSize
+      maxDataLines
+      maxBufferedChunks
 
       event = {
         data: undefined,
@@ -14893,6 +15465,7 @@ ${pendingInterceptorsFormatter.format(pending)}
 
       /**
        * @param {object} options
+       * @param {number} [options.maxEventSize]
        * @param {eventSourceSettings} options.eventSourceSettings
        * @param {Function} [options.push]
        */
@@ -14904,6 +15477,19 @@ ${pendingInterceptorsFormatter.format(pending)}
         super(options)
 
         this.state = options.eventSourceSettings || {}
+        this.maxEventSize = options.maxEventSize ?? defaultMaxEventSize
+        const parserItemLimit =
+          this.maxEventSize > 0
+            ? Math.min(
+                maxParserItems,
+                Math.max(
+                  minParserItems,
+                  Math.floor(this.maxEventSize / bytesPerParserItem)
+                )
+              )
+            : 0
+        this.maxDataLines = parserItemLimit
+        this.maxBufferedChunks = parserItemLimit
         if (options.push) {
           this.push = options.push
         }
@@ -14921,89 +15507,31 @@ ${pendingInterceptorsFormatter.format(pending)}
           return
         }
 
-        // Cache the chunk in the buffer, as the data might not be complete while
-        // processing it
-        // TODO: Investigate if there is a more performant way to handle
-        // incoming chunks
-        // see: https://github.com/nodejs/undici/issues/2630
-        if (this.buffer) {
-          this.buffer = Buffer.concat([this.buffer, chunk])
-        } else {
-          this.buffer = chunk
+        // A leading line ending can immediately release the currently buffered
+        // line, even when it uses the final allowed chunk slot.
+        if (
+          this.maxEventSize > 0 &&
+          this.chunks.length >= this.maxBufferedChunks &&
+          chunk[0] !== LF &&
+          chunk[0] !== CR
+        ) {
+          callback(createMaxEventSizeExceededError())
+          return
         }
+        this.chunks.push(chunk)
 
         // Strip leading byte-order-mark if we opened the stream and started
         // the processing of the incoming data
         if (this.checkBOM) {
-          switch (this.buffer.length) {
-            case 1:
-              // Check if the first byte is the same as the first byte of the BOM
-              if (this.buffer[0] === BOM[0]) {
-                // If it is, we need to wait for more data
-                callback()
-                return
-              }
-              // Set the checkBOM flag to false as we don't need to check for the
-              // BOM anymore
-              this.checkBOM = false
-
-              // The buffer only contains one byte so we need to wait for more data
-              callback()
-              return
-            case 2:
-              // Check if the first two bytes are the same as the first two bytes
-              // of the BOM
-              if (this.buffer[0] === BOM[0] && this.buffer[1] === BOM[1]) {
-                // If it is, we need to wait for more data, because the third byte
-                // is needed to determine if it is the BOM or not
-                callback()
-                return
-              }
-
-              // Set the checkBOM flag to false as we don't need to check for the
-              // BOM anymore
-              this.checkBOM = false
-              break
-            case 3:
-              // Check if the first three bytes are the same as the first three
-              // bytes of the BOM
-              if (
-                this.buffer[0] === BOM[0] &&
-                this.buffer[1] === BOM[1] &&
-                this.buffer[2] === BOM[2]
-              ) {
-                // If it is, we can drop the buffered data, as it is only the BOM
-                this.buffer = Buffer.alloc(0)
-                // Set the checkBOM flag to false as we don't need to check for the
-                // BOM anymore
-                this.checkBOM = false
-
-                // Await more data
-                callback()
-                return
-              }
-              // If it is not the BOM, we can start processing the data
-              this.checkBOM = false
-              break
-            default:
-              // The buffer is longer than 3 bytes, so we can drop the BOM if it is
-              // present
-              if (
-                this.buffer[0] === BOM[0] &&
-                this.buffer[1] === BOM[1] &&
-                this.buffer[2] === BOM[2]
-              ) {
-                // Remove the BOM from the buffer
-                this.buffer = this.buffer.subarray(3)
-              }
-
-              // Set the checkBOM flag to false as we don't need to check for the
-              this.checkBOM = false
-              break
+          if (this.handleBOM()) {
+            callback()
+            return
           }
         }
 
-        while (this.pos < this.buffer.length) {
+        while (this.hasCurrentByte()) {
+          const byte = this.currentByte()
+
           // If the previous line ended with an end-of-line, we need to check
           // if the next character is also an end-of-line.
           if (this.eventEndCheck) {
@@ -15016,10 +15544,9 @@ ${pendingInterceptorsFormatter.format(pending)}
             if (this.crlfCheck) {
               // If the current character is a line feed, we can remove it
               // from the buffer and reset the crlfCheck flag
-              if (this.buffer[this.pos] === LF) {
-                this.buffer = this.buffer.subarray(this.pos + 1)
-                this.pos = 0
+              if (byte === LF) {
                 this.crlfCheck = false
+                this.consumeCurrentByte()
 
                 // It is possible that the line feed is not the end of the
                 // event. We need to check if the next character is an
@@ -15035,23 +15562,17 @@ ${pendingInterceptorsFormatter.format(pending)}
               this.crlfCheck = false
             }
 
-            if (this.buffer[this.pos] === LF || this.buffer[this.pos] === CR) {
+            if (byte === LF || byte === CR) {
               // If the current character is a carriage return, we need to
               // set the crlfCheck flag to true, as we need to check if the
               // next character is a line feed so we can remove it from the
               // buffer
-              if (this.buffer[this.pos] === CR) {
+              if (byte === CR) {
                 this.crlfCheck = true
               }
 
-              this.buffer = this.buffer.subarray(this.pos + 1)
-              this.pos = 0
-              if (
-                this.event.data !== undefined ||
-                this.event.event ||
-                this.event.id ||
-                this.event.retry
-              ) {
+              this.consumeCurrentByte()
+              if (this.hasPendingEvent()) {
                 this.processEvent(this.event)
               }
               this.clearEvent()
@@ -15065,22 +15586,23 @@ ${pendingInterceptorsFormatter.format(pending)}
 
           // If the current character is an end-of-line, we can process the
           // line
-          if (this.buffer[this.pos] === LF || this.buffer[this.pos] === CR) {
+          if (byte === LF || byte === CR) {
             // If the current character is a carriage return, we need to
             // set the crlfCheck flag to true, as we need to check if the
             // next character is a line feed
-            if (this.buffer[this.pos] === CR) {
+            if (byte === CR) {
               this.crlfCheck = true
             }
 
             // In any case, we can process the line as we reached an
             // end-of-line character
-            this.parseLine(this.buffer.subarray(0, this.pos), this.event)
-
-            // Remove the processed line from the buffer
-            this.buffer = this.buffer.subarray(this.pos + 1)
-            // Reset the position as we removed the processed line from the buffer
-            this.pos = 0
+            try {
+              this.parseLine(this.readLine(), this.event)
+            } catch (error) {
+              callback(error)
+              return
+            }
+            this.consumeCurrentByte()
             // A line was processed and this could be the end of the event. We need
             // to check if the next line is empty to determine if the event is
             // finished.
@@ -15088,15 +15610,31 @@ ${pendingInterceptorsFormatter.format(pending)}
             continue
           }
 
-          this.pos++
+          // readLine() is only called after CR or LF. Reject an unfinished line
+          // before it can retain an unbounded number of decoded chunks. The seven
+          // extra bytes allow the longest field prefix ("event: " or "retry: ").
+          if (
+            this.maxEventSize > 0 &&
+            ++this.lineLength > this.maxEventSize + 7
+          ) {
+            callback(createMaxEventSizeExceededError())
+            return
+          }
+          this.advanceCursor()
         }
 
         callback()
       }
 
+      _destroy(error, callback) {
+        this.chunks.length = 0
+        this.clearEvent()
+        super._destroy(error, callback)
+      }
+
       /**
        * @param {Buffer} line
-       * @param {EventStreamEvent} event
+       * @param {EventSourceStreamEvent} event
        */
       parseLine(line, event) {
         // If the line is empty (a blank line)
@@ -15113,65 +15651,78 @@ ${pendingInterceptorsFormatter.format(pending)}
           return
         }
 
-        let field = ''
-        let value = ''
+        let fieldLength = line.length
+        let valueStart = line.length
 
         // If the line contains a U+003A COLON character (:)
         if (colonPosition !== -1) {
-          // Collect the characters on the line before the first U+003A COLON
-          // character (:), and let field be that string.
-          // TODO: Investigate if there is a more performant way to extract the
-          // field
-          // see: https://github.com/nodejs/undici/issues/2630
-          field = line.subarray(0, colonPosition).toString('utf8')
+          fieldLength = colonPosition
 
           // Collect the characters on the line after the first U+003A COLON
           // character (:), and let value be that string.
           // If value starts with a U+0020 SPACE character, remove it from value.
-          let valueStart = colonPosition + 1
+          valueStart = colonPosition + 1
           if (line[valueStart] === SPACE) {
             ++valueStart
           }
-          // TODO: Investigate if there is a more performant way to extract the
-          // value
-          // see: https://github.com/nodejs/undici/issues/2630
-          value = line.subarray(valueStart).toString('utf8')
-
-          // Otherwise, the string is not empty but does not contain a U+003A COLON
-          // character (:)
-        } else {
-          // Process the field using the steps described below, using the whole
-          // line as the field name, and the empty string as the field value.
-          field = line.toString('utf8')
-          value = ''
         }
 
-        // Modify the event with the field name and value. The value is also
-        // decoded as UTF-8
-        switch (field) {
-          case 'data':
-            if (event[field] === undefined) {
-              event[field] = value
-            } else {
-              event[field] += `\n${value}`
-            }
-            break
-          case 'retry':
-            if (isASCIINumber(value)) {
-              event[field] = value
-            }
-            break
-          case 'id':
-            if (isValidLastEventId(value)) {
-              event[field] = value
-            }
-            break
-          case 'event':
-            if (value.length > 0) {
-              event[field] = value
-            }
-            break
+        if (isFieldName(line, fieldLength, DATA)) {
+          if (
+            this.maxEventSize > 0 &&
+            this.dataLineCount >= this.maxDataLines
+          ) {
+            throw createMaxEventSizeExceededError()
+          }
+          const valueBytes = line.length - valueStart
+          const dataSize =
+            this.eventFieldSizes.data +
+            (event.data === undefined ? 0 : 1) +
+            valueBytes
+          this.setEventFieldSize('data', dataSize)
+
+          const value = line.toString('utf8', valueStart)
+
+          if (event.data === undefined) {
+            event.data = value
+          } else {
+            event.data += `\n${value}`
+          }
+          this.dataLineCount++
+          return
         }
+
+        if (isFieldName(line, fieldLength, RETRY)) {
+          if (isASCIINumberBytes(line, valueStart)) {
+            this.setEventFieldSize('retry', line.length - valueStart)
+            event.retry = line.toString('utf8', valueStart)
+          }
+          return
+        }
+
+        if (isFieldName(line, fieldLength, ID)) {
+          if (isValidLastEventIdBytes(line, valueStart)) {
+            this.setEventFieldSize('id', line.length - valueStart)
+            event.id = line.toString('utf8', valueStart)
+          }
+          return
+        }
+
+        if (isFieldName(line, fieldLength, EVENT)) {
+          if (valueStart < line.length) {
+            this.setEventFieldSize('event', line.length - valueStart)
+            event.event = line.toString('utf8', valueStart)
+          }
+        }
+      }
+
+      setEventFieldSize(field, size) {
+        const eventSize = this.eventSize - this.eventFieldSizes[field] + size
+        if (this.maxEventSize > 0 && eventSize > this.maxEventSize) {
+          throw createMaxEventSizeExceededError()
+        }
+        this.eventSize = eventSize
+        this.eventFieldSizes[field] = size
       }
 
       /**
@@ -15200,12 +15751,166 @@ ${pendingInterceptorsFormatter.format(pending)}
       }
 
       clearEvent() {
-        this.event = {
-          data: undefined,
-          event: undefined,
-          id: undefined,
-          retry: undefined
+        this.event.data = undefined
+        this.event.event = undefined
+        this.event.id = undefined
+        this.event.retry = undefined
+        this.eventSize = 0
+        this.dataLineCount = 0
+        this.eventFieldSizes.data = 0
+        this.eventFieldSizes.event = 0
+        this.eventFieldSizes.id = 0
+        this.eventFieldSizes.retry = 0
+      }
+
+      hasPendingEvent() {
+        return (
+          this.event.data !== undefined ||
+          this.event.event !== undefined ||
+          this.event.id !== undefined ||
+          this.event.retry !== undefined
+        )
+      }
+
+      hasCurrentByte() {
+        return (
+          this.chunkIndex < this.chunks.length &&
+          this.pos < this.chunks[this.chunkIndex].length
+        )
+      }
+
+      currentByte() {
+        return this.chunks[this.chunkIndex][this.pos]
+      }
+
+      consumeCurrentByte() {
+        this.advanceCursor()
+        this.syncLineStartToCursor()
+      }
+
+      advanceCursor() {
+        this.pos++
+
+        while (
+          this.chunkIndex < this.chunks.length &&
+          this.pos >= this.chunks[this.chunkIndex].length
+        ) {
+          this.chunkIndex++
+          this.pos = 0
         }
+      }
+
+      syncLineStartToCursor() {
+        this.lineChunkIndex = this.chunkIndex
+        this.linePos = this.pos
+        this.lineLength = 0
+        this.dropConsumedChunks()
+      }
+
+      dropConsumedChunks() {
+        if (this.lineChunkIndex > 0) {
+          const consumed = this.lineChunkIndex
+          this.chunks.splice(0, consumed)
+          this.lineChunkIndex = 0
+          this.chunkIndex -= consumed
+        }
+
+        if (this.chunkIndex === this.chunks.length) {
+          this.chunks.length = 0
+          this.chunkIndex = 0
+          this.pos = 0
+          this.lineChunkIndex = 0
+          this.linePos = 0
+        }
+      }
+
+      readLine() {
+        if (this.lineChunkIndex === this.chunkIndex) {
+          return this.chunks[this.chunkIndex].subarray(this.linePos, this.pos)
+        }
+
+        const chunks = []
+        let length = 0
+
+        for (let i = this.lineChunkIndex; i <= this.chunkIndex; i++) {
+          const chunk = this.chunks[i]
+          const start = i === this.lineChunkIndex ? this.linePos : 0
+          const end = i === this.chunkIndex ? this.pos : chunk.length
+          const slice = chunk.subarray(start, end)
+          length += slice.length
+          chunks.push(slice)
+        }
+
+        return Buffer.concat(chunks, length)
+      }
+
+      peekBufferedByte(offset) {
+        let chunkIndex = this.lineChunkIndex
+        let pos = this.linePos
+
+        while (chunkIndex < this.chunks.length) {
+          const chunk = this.chunks[chunkIndex]
+          const remaining = chunk.length - pos
+
+          if (offset < remaining) {
+            return chunk[pos + offset]
+          }
+
+          offset -= remaining
+          chunkIndex++
+          pos = 0
+        }
+      }
+
+      discardLeadingBytes(count) {
+        while (count > 0 && this.lineChunkIndex < this.chunks.length) {
+          const chunk = this.chunks[this.lineChunkIndex]
+          const remaining = chunk.length - this.linePos
+
+          if (count < remaining) {
+            this.linePos += count
+            count = 0
+          } else {
+            count -= remaining
+            this.lineChunkIndex++
+            this.linePos = 0
+          }
+        }
+
+        this.chunkIndex = this.lineChunkIndex
+        this.pos = this.linePos
+        this.dropConsumedChunks()
+      }
+
+      handleBOM() {
+        const first = this.peekBufferedByte(0)
+        const second = this.peekBufferedByte(1)
+        const third = this.peekBufferedByte(2)
+
+        if (second === undefined) {
+          if (first === BOM[0]) {
+            return true
+          }
+
+          this.checkBOM = false
+          return true
+        }
+
+        if (third === undefined) {
+          if (first === BOM[0] && second === BOM[1]) {
+            return true
+          }
+
+          this.checkBOM = false
+          return false
+        }
+
+        if (first === BOM[0] && second === BOM[1] && third === BOM[2]) {
+          this.discardLeadingBytes(3)
+        }
+
+        this.checkBOM = false
+        return !this.hasCurrentByte()
       }
     }
 
@@ -15228,6 +15933,7 @@ ${pendingInterceptorsFormatter.format(pending)}
     const { delay } = __nccwpck_require__(4811)
     const { kEnumerableProperty } = __nccwpck_require__(3440)
     const { environmentSettingsObject } = __nccwpck_require__(3168)
+    const { getGlobalDispatcher } = __nccwpck_require__(2581)
 
     let experimentalWarned = false
 
@@ -15517,6 +16223,7 @@ ${pendingInterceptorsFormatter.format(pending)}
 
           const eventSourceStream = new EventSourceStream({
             eventSourceSettings: this.#state,
+            maxEventSize: this.#dispatcher.eventSourceOptions?.maxEventSize,
             push: (event) => {
               this.dispatchEvent(
                 createFastMessageEvent(event.type, event.options)
@@ -15694,7 +16401,8 @@ ${pendingInterceptorsFormatter.format(pending)}
       },
       {
         key: 'dispatcher', // undici only
-        converter: webidl.converters.any
+        converter: webidl.converters.any,
+        defaultValue: () => getGlobalDispatcher()
       }
     ])
 
@@ -21074,8 +21782,10 @@ ${pendingInterceptorsFormatter.format(pending)}
       // 19. Run these steps in parallel:
 
       //    1. Run these steps, but abort when fetchParams is canceled:
-      fetchParams.controller.onAborted = onAborted
-      fetchParams.controller.on('terminated', onAborted)
+      if (!fetchParams.controller.resume) {
+        fetchParams.controller.on('terminated', onAborted)
+      }
+
       fetchParams.controller.resume = async () => {
         // 1. While true
         while (true) {
@@ -21266,8 +21976,6 @@ ${pendingInterceptorsFormatter.format(pending)}
                 }
                 location = headersList.get('location', true)
 
-                this.body = new Readable({ read: resume })
-
                 const decoders = []
 
                 const willFollow =
@@ -21297,7 +22005,7 @@ ${pendingInterceptorsFormatter.format(pending)}
                   // CVE fix similar to urllib3 (GHSA-gm62-xv2j-4w53) and curl (CVE-2022-32206).
                   const maxContentEncodings = 5
                   if (codings.length > maxContentEncodings) {
-                    reject(
+                    this.abort(
                       new Error(
                         `too many content-encodings in response: ${codings.length}, maximum allowed is ${maxContentEncodings}`
                       )
@@ -21339,6 +22047,8 @@ ${pendingInterceptorsFormatter.format(pending)}
                     }
                   }
                 }
+
+                this.body = new Readable({ read: resume })
 
                 const onError = this.onError.bind(this)
 
@@ -21384,13 +22094,6 @@ ${pendingInterceptorsFormatter.format(pending)}
               onComplete() {
                 if (this.abort) {
                   fetchParams.controller.off('terminated', this.abort)
-                }
-
-                if (fetchParams.controller.onAborted) {
-                  fetchParams.controller.off(
-                    'terminated',
-                    fetchParams.controller.onAborted
-                  )
                 }
 
                 fetchParams.controller.ended = true
@@ -27031,7 +27734,10 @@ ${pendingInterceptorsFormatter.format(pending)}
             // is specified, the server needs to include the same field and one of
             // the selected subprotocol values in its response for the connection to
             // be established.
-            if (!requestProtocols.includes(secProtocol)) {
+            if (
+              requestProtocols === null ||
+              !requestProtocols.includes(secProtocol)
+            ) {
               failWebsocketConnection(
                 ws,
                 'Protocol was not set in the opening handshake.'
@@ -27747,6 +28453,7 @@ ${pendingInterceptorsFormatter.format(pending)}
   /***/ 9469: /***/ (module, __unused_webpack_exports, __nccwpck_require__) => {
     const { createInflateRaw, Z_DEFAULT_WINDOWBITS } = __nccwpck_require__(8522)
     const { isValidClientWindowBits } = __nccwpck_require__(8625)
+    const { MessageSizeExceededError } = __nccwpck_require__(8707)
 
     const tail = Buffer.from([0x00, 0x00, 0xff, 0xff])
     const kBuffer = Symbol('kBuffer')
@@ -27758,21 +28465,33 @@ ${pendingInterceptorsFormatter.format(pending)}
 
       #options = {}
 
-      constructor(extensions) {
+      #maxPayloadSize = 0
+
+      /**
+       * @param {Map<string, string>} extensions
+       */
+      constructor(extensions, options) {
         this.#options.serverNoContextTakeover = extensions.has(
           'server_no_context_takeover'
         )
         this.#options.serverMaxWindowBits = extensions.get(
           'server_max_window_bits'
         )
+
+        this.#maxPayloadSize = options.maxPayloadSize
       }
 
+      /**
+       * Decompress a compressed payload.
+       * @param {Buffer} chunk Compressed data
+       * @param {boolean} fin Final fragment flag
+       * @param {Function} callback Callback function
+       */
       decompress(chunk, fin, callback) {
         // An endpoint uses the following algorithm to decompress a message.
         // 1.  Append 4 octets of 0x00 0x00 0xff 0xff to the tail end of the
         //     payload of the message.
         // 2.  Decompress the resulting data using DEFLATE.
-
         if (!this.#inflate) {
           let windowBits = Z_DEFAULT_WINDOWBITS
 
@@ -27786,13 +28505,34 @@ ${pendingInterceptorsFormatter.format(pending)}
             windowBits = Number.parseInt(this.#options.serverMaxWindowBits)
           }
 
-          this.#inflate = createInflateRaw({ windowBits })
+          try {
+            this.#inflate = createInflateRaw({ windowBits })
+          } catch (err) {
+            callback(err)
+            return
+          }
           this.#inflate[kBuffer] = []
           this.#inflate[kLength] = 0
 
           this.#inflate.on('data', (data) => {
-            this.#inflate[kBuffer].push(data)
             this.#inflate[kLength] += data.length
+
+            if (
+              this.#maxPayloadSize > 0 &&
+              this.#inflate[kLength] > this.#maxPayloadSize
+            ) {
+              callback(new MessageSizeExceededError())
+              // The inflater may still hold buffered input that can emit a late
+              // zlib error. Remove the data listener, then deterministically stop
+              // the stream so a subsequent 'error' cannot fire without a listener
+              // (which would terminate the process as an unhandled error event).
+              this.#inflate.removeAllListeners()
+              this.#inflate.destroy()
+              this.#inflate = null
+              return
+            }
+
+            this.#inflate[kBuffer].push(data)
           })
 
           this.#inflate.on('error', (err) => {
@@ -27807,6 +28547,10 @@ ${pendingInterceptorsFormatter.format(pending)}
         }
 
         this.#inflate.flush(() => {
+          if (!this.#inflate) {
+            return
+          }
+
           const full = Buffer.concat(
             this.#inflate[kBuffer],
             this.#inflate[kLength]
@@ -27846,6 +28590,12 @@ ${pendingInterceptorsFormatter.format(pending)}
     const { WebsocketFrameSend } = __nccwpck_require__(3264)
     const { closeWebSocketConnection } = __nccwpck_require__(6897)
     const { PerMessageDeflate } = __nccwpck_require__(9469)
+    const { MessageSizeExceededError } = __nccwpck_require__(8707)
+
+    function failWebsocketConnectionWithCode(ws, code, reason) {
+      closeWebSocketConnection(ws, code, reason, Buffer.byteLength(reason))
+      failWebsocketConnection(ws, reason)
+    }
 
     // This code was influenced by ws released under the MIT license.
     // Copyright (c) 2011 Einar Otto Stangvik <einaros@gmail.com>
@@ -27854,6 +28604,7 @@ ${pendingInterceptorsFormatter.format(pending)}
 
     class ByteParser extends Writable {
       #buffers = []
+      #fragmentsBytes = 0
       #byteOffset = 0
       #loop = false
 
@@ -27865,16 +28616,29 @@ ${pendingInterceptorsFormatter.format(pending)}
       /** @type {Map<string, PerMessageDeflate>} */
       #extensions
 
-      constructor(ws, extensions) {
+      /** @type {number} */
+      #maxFragments
+
+      /** @type {number} */
+      #maxPayloadSize
+
+      /**
+       * @param {import('./websocket').WebSocket} ws
+       * @param {Map<string, string>|null} extensions
+       * @param {{ maxFragments?: number, maxPayloadSize?: number }} [options]
+       */
+      constructor(ws, extensions, options = {}) {
         super()
 
         this.ws = ws
         this.#extensions = extensions == null ? new Map() : extensions
+        this.#maxFragments = options.maxFragments ?? 0
+        this.#maxPayloadSize = options.maxPayloadSize ?? 0
 
         if (this.#extensions.has('permessage-deflate')) {
           this.#extensions.set(
             'permessage-deflate',
-            new PerMessageDeflate(extensions)
+            new PerMessageDeflate(extensions, options)
           )
         }
       }
@@ -27889,6 +28653,23 @@ ${pendingInterceptorsFormatter.format(pending)}
         this.#loop = true
 
         this.run(callback)
+      }
+
+      #validatePayloadLength() {
+        if (
+          this.#maxPayloadSize > 0 &&
+          !isControlFrame(this.#info.opcode) &&
+          this.#info.payloadLength + this.#fragmentsBytes > this.#maxPayloadSize
+        ) {
+          failWebsocketConnectionWithCode(
+            this.ws,
+            1009,
+            'Payload size exceeds maximum allowed size'
+          )
+          return false
+        }
+
+        return true
       }
 
       /**
@@ -27992,6 +28773,10 @@ ${pendingInterceptorsFormatter.format(pending)}
             if (payloadLength <= 125) {
               this.#info.payloadLength = payloadLength
               this.#state = parserStates.READ_DATA
+
+              if (!this.#validatePayloadLength()) {
+                return
+              }
             } else if (payloadLength === 126) {
               this.#state = parserStates.PAYLOADLENGTH_16
             } else if (payloadLength === 127) {
@@ -28016,6 +28801,10 @@ ${pendingInterceptorsFormatter.format(pending)}
 
             this.#info.payloadLength = buffer.readUInt16BE(0)
             this.#state = parserStates.READ_DATA
+
+            if (!this.#validatePayloadLength()) {
+              return
+            }
           } else if (this.#state === parserStates.PAYLOADLENGTH_64) {
             if (this.#byteOffset < 8) {
               return callback()
@@ -28023,6 +28812,7 @@ ${pendingInterceptorsFormatter.format(pending)}
 
             const buffer = this.consume(8)
             const upper = buffer.readUInt32BE(0)
+            const lower = buffer.readUInt32BE(4)
 
             // 2^31 is the maximum bytes an arraybuffer can contain
             // on 32-bit systems. Although, on 64-bit systems, this is
@@ -28030,7 +28820,7 @@ ${pendingInterceptorsFormatter.format(pending)}
             // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Invalid_array_length
             // https://source.chromium.org/chromium/chromium/src/+/main:v8/src/common/globals.h;drc=1946212ac0100668f14eb9e2843bdd846e510a1e;bpv=1;bpt=1;l=1275
             // https://source.chromium.org/chromium/chromium/src/+/main:v8/src/objects/js-array-buffer.h;l=34;drc=1946212ac0100668f14eb9e2843bdd846e510a1e
-            if (upper > 2 ** 31 - 1) {
+            if (upper !== 0 || lower > 2 ** 31 - 1) {
               failWebsocketConnection(
                 this.ws,
                 'Received payload length > 2^31 bytes.'
@@ -28038,10 +28828,12 @@ ${pendingInterceptorsFormatter.format(pending)}
               return
             }
 
-            const lower = buffer.readUInt32BE(4)
-
-            this.#info.payloadLength = (upper << 8) + lower
+            this.#info.payloadLength = lower
             this.#state = parserStates.READ_DATA
+
+            if (!this.#validatePayloadLength()) {
+              return
+            }
           } else if (this.#state === parserStates.READ_DATA) {
             if (this.#byteOffset < this.#info.payloadLength) {
               return callback()
@@ -28052,22 +28844,48 @@ ${pendingInterceptorsFormatter.format(pending)}
             if (isControlFrame(this.#info.opcode)) {
               this.#loop = this.parseControlFrame(body)
               this.#state = parserStates.INFO
+
+              // If the automatic PONG/CLOSE reply filled the socket's write buffer,
+              // stop parsing and resume on drain so a PING flood cannot grow the
+              // outbound queue without bound.
+              const socket = this.ws[kResponse].socket
+              if (this.#loop && socket.writableNeedDrain) {
+                this.#loop = false
+                socket.once('drain', () => {
+                  if (this.destroyed) return
+                  this.#loop = true
+                  this.run(callback)
+                })
+                return
+              }
             } else {
               if (!this.#info.compressed) {
-                this.#fragments.push(body)
+                if (!this.writeFragments(body)) {
+                  return
+                }
+
+                if (
+                  this.#maxPayloadSize > 0 &&
+                  this.#fragmentsBytes > this.#maxPayloadSize
+                ) {
+                  failWebsocketConnectionWithCode(
+                    this.ws,
+                    1009,
+                    new MessageSizeExceededError().message
+                  )
+                  return
+                }
 
                 // If the frame is not fragmented, a message has been received.
                 // If the frame is fragmented, it will terminate with a fin bit set
                 // and an opcode of 0 (continuation), therefore we handle that when
                 // parsing continuation frames, not here.
                 if (!this.#info.fragmented && this.#info.fin) {
-                  const fullMessage = Buffer.concat(this.#fragments)
                   websocketMessageReceived(
                     this.ws,
                     this.#info.binaryType,
-                    fullMessage
+                    this.consumeFragments()
                   )
-                  this.#fragments.length = 0
                 }
 
                 this.#state = parserStates.INFO
@@ -28076,16 +28894,31 @@ ${pendingInterceptorsFormatter.format(pending)}
                   .get('permessage-deflate')
                   .decompress(body, this.#info.fin, (error, data) => {
                     if (error) {
-                      closeWebSocketConnection(
+                      const code =
+                        error instanceof MessageSizeExceededError ? 1009 : 1007
+                      failWebsocketConnectionWithCode(
                         this.ws,
-                        1007,
-                        error.message,
-                        error.message.length
+                        code,
+                        error.message
                       )
                       return
                     }
 
-                    this.#fragments.push(data)
+                    if (!this.writeFragments(data)) {
+                      return
+                    }
+
+                    if (
+                      this.#maxPayloadSize > 0 &&
+                      this.#fragmentsBytes > this.#maxPayloadSize
+                    ) {
+                      failWebsocketConnectionWithCode(
+                        this.ws,
+                        1009,
+                        new MessageSizeExceededError().message
+                      )
+                      return
+                    }
 
                     if (!this.#info.fin) {
                       this.#state = parserStates.INFO
@@ -28097,12 +28930,11 @@ ${pendingInterceptorsFormatter.format(pending)}
                     websocketMessageReceived(
                       this.ws,
                       this.#info.binaryType,
-                      Buffer.concat(this.#fragments)
+                      this.consumeFragments()
                     )
 
                     this.#loop = true
                     this.#state = parserStates.INFO
-                    this.#fragments.length = 0
                     this.run(callback)
                   })
 
@@ -28154,6 +28986,39 @@ ${pendingInterceptorsFormatter.format(pending)}
         this.#byteOffset -= n
 
         return buffer
+      }
+
+      writeFragments(fragment) {
+        if (
+          this.#maxFragments > 0 &&
+          this.#fragments.length === this.#maxFragments
+        ) {
+          failWebsocketConnectionWithCode(
+            this.ws,
+            1008,
+            'Too many message fragments'
+          )
+          return false
+        }
+
+        this.#fragmentsBytes += fragment.length
+        this.#fragments.push(fragment)
+        return true
+      }
+
+      consumeFragments() {
+        const fragments = this.#fragments
+
+        if (fragments.length === 1) {
+          this.#fragmentsBytes = 0
+          return fragments.shift()
+        }
+
+        const output = Buffer.concat(fragments, this.#fragmentsBytes)
+        this.#fragments = []
+        this.#fragmentsBytes = 0
+
+        return output
       }
 
       parseCloseBody(data) {
@@ -28696,6 +29561,12 @@ ${pendingInterceptorsFormatter.format(pending)}
      * @param {string} value
      */
     function isValidClientWindowBits(value) {
+      // Must have at least one character
+      if (value.length === 0) {
+        return false
+      }
+
+      // Check all characters are ASCII digits
       for (let i = 0; i < value.length; i++) {
         const byte = value.charCodeAt(i)
 
@@ -28704,7 +29575,9 @@ ${pendingInterceptorsFormatter.format(pending)}
         }
       }
 
-      return true
+      // Check numeric range: zlib requires windowBits in range 8-15
+      const num = Number.parseInt(value, 10)
+      return num >= 8 && num <= 15
     }
 
     // https://nodejs.org/api/intl.html#detecting-internationalization-support
@@ -29219,11 +30092,18 @@ ${pendingInterceptorsFormatter.format(pending)}
        * @see https://websockets.spec.whatwg.org/#feedback-from-the-protocol
        */
       #onConnectionEstablished(response, parsedExtensions) {
-        // processResponse is called when the "response’s header list has been received and initialized."
+        // processResponse is called when the "response's header list has been received and initialized."
         // once this happens, the connection is open
         this[kResponse] = response
 
-        const parser = new ByteParser(this, parsedExtensions)
+        const webSocketOptions = this[kController]?.dispatcher?.webSocketOptions
+        const maxFragments = webSocketOptions?.maxFragments
+        const maxPayloadSize = webSocketOptions?.maxPayloadSize
+
+        const parser = new ByteParser(this, parsedExtensions, {
+          maxFragments,
+          maxPayloadSize
+        })
         parser.on('drain', onParserDrain)
         parser.on('error', onParserError.bind(this))
 
