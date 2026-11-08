@@ -51,4 +51,29 @@ describe('action: masking', () => {
     const out = runAction({ INPUT_VALUE: 'new-value', STUB_BODY: '' })
     assert.ok(!out.includes('::add-mask::'), out)
   })
+
+  it('masks every string and number leaf of a parsed object', () => {
+    const out = runAction({
+      STUB_BODY:
+        '{"a":{"token":"leaf-secret"},"list":["item-one",424242],"ok":true}'
+    })
+    assert.ok(out.includes('::add-mask::leaf-secret\n'), out)
+    assert.ok(out.includes('::add-mask::item-one\n'), out)
+    assert.ok(out.includes('::add-mask::424242\n'), out)
+  })
+
+  it('masks every non-empty trimmed line of a multi-line value', () => {
+    const out = runAction({
+      STUB_BODY: 'first-line\n  second-line  \n\nthird-line'
+    })
+    assert.ok(out.includes('::add-mask::first-line\n'), out)
+    assert.ok(out.includes('::add-mask::second-line\n'), out)
+    assert.ok(out.includes('::add-mask::third-line\n'), out)
+  })
+
+  it('masks every line of a multi-line string inside an object', () => {
+    const out = runAction({ STUB_BODY: '{"key":"line-a\\nline-b"}' })
+    assert.ok(out.includes('::add-mask::line-a\n'), out)
+    assert.ok(out.includes('::add-mask::line-b\n'), out)
+  })
 })

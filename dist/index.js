@@ -34011,6 +34011,41 @@ async function kv(
   }
 } // CONCATENATED MODULE: ./index.js
 
+// KV often holds tokens. Mask the value, each of its lines (the runner masks
+// per line) and each string or number inside parsed JSON, so that
+// fromJSON(...).token is masked too.
+function maskValue(value) {
+  const secrets = new Set()
+
+  const add = (text) => {
+    secrets.add(text)
+    for (const line of text.split('\n')) {
+      secrets.add(line.trim())
+    }
+  }
+
+  const addLeaves = (node) => {
+    if (typeof node === 'string' || typeof node === 'number') {
+      add(String(node))
+    } else if (node && typeof node === 'object') {
+      Object.values(node).forEach(addLeaves)
+    }
+  }
+
+  if (typeof value === 'string') {
+    add(value)
+  } else {
+    add(JSON.stringify(value))
+    addLeaves(value)
+  }
+
+  for (const secret of secrets) {
+    if (secret) {
+      core_setSecret(secret)
+    }
+  }
+}
+
 async function run() {
   try {
     const accountId = process.env.CLOUDFLARE_ACCOUNT_ID
@@ -34035,14 +34070,7 @@ async function run() {
     )
 
     if (returnValue !== null && returnValue !== undefined) {
-      // KV often holds tokens. Mask before the value can reach any log.
-      const masked =
-        typeof returnValue === 'string'
-          ? returnValue
-          : JSON.stringify(returnValue)
-      if (masked) {
-        core_setSecret(masked)
-      }
+      maskValue(returnValue)
       setOutput('value', returnValue)
     }
   } catch (error) {

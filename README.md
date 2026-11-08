@@ -87,6 +87,10 @@ credentials. You can retrieve them on your
 | ------- | ----------- |
 | `value` | KV value    |
 
+The output `value` and its parts are masked in logs: each line, and each string
+or number inside a JSON value. Short values such as `1` or `true` are masked
+too, so they also disappear from other log lines.
+
 ## Development
 
 Requirements: Node >= 20
