@@ -71,23 +71,23 @@ credentials. You can retrieve them on your
 
 ## Inputs
 
-| Name                   | Requirement | Description                                                                                                                                                                                                       |
-| ---------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `namespace_identifier` | required    | Cloudflare namespace ID                                                                                                                                                                                           |
-| `key_name`             | required    | KV key name                                                                                                                                                                                                       |
-| `value`                | optional    | Use "value" to set a key; omit to retrieve the current value. Ignored when `operation` is `get` or `delete`.                                                                                                      |
-| `expiration`           | optional    | Absolute expiration (Unix timestamp) Ignored for `get` and `delete`.                                                                                                                                              |
-| `expiration_ttl`       | optional    | Relative expiration in seconds. If both `expiration` and `expiration_ttl` are set, `expiration` takes precedence. Ignored for `get` and `delete`.                                                                 |
-| `operation`            | optional    | `get`, `put` or `delete`. Default: `put` if `value` is not empty, otherwise `get`. Use `put` to set an empty value.                                                                                               |
-| `fail_on_missing`      | optional    | Default `true`: a `get` of a missing key fails the step. Set `false` to get an empty `value` output instead. Only a key-not-found 404 counts as missing. Other errors, such as an unknown namespace, always fail. |
+| Name                   | Requirement | Description                                                                                                                                                                                                                                                                                                                                                            |
+| ---------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `namespace_identifier` | required    | Cloudflare namespace ID                                                                                                                                                                                                                                                                                                                                                |
+| `key_name`             | required    | KV key name                                                                                                                                                                                                                                                                                                                                                            |
+| `value`                | optional    | Use "value" to set a key; omit to retrieve the current value. Ignored when `operation` is `get` or `delete`.                                                                                                                                                                                                                                                           |
+| `expiration`           | optional    | Absolute expiration (Unix timestamp). Ignored for `get` and `delete`.                                                                                                                                                                                                                                                                                                  |
+| `expiration_ttl`       | optional    | Relative expiration in seconds. If both `expiration` and `expiration_ttl` are set, `expiration` takes precedence. Ignored for `get` and `delete`.                                                                                                                                                                                                                      |
+| `operation`            | optional    | `get`, `put` or `delete`. Default: `put` if `value` is not empty, otherwise `get`. Use `put` to set an empty value.                                                                                                                                                                                                                                                    |
+| `fail_on_missing`      | optional    | Default `true`: a `get` of a missing key fails the step. Set `false` to get an empty `value` output instead. Only a key-not-found 404 counts as missing. Other errors, such as an unknown namespace, always fail. Accepts only `true`, `True`, `TRUE`, `false`, `False` or `FALSE`. Any other value, including an empty one such as an unset `vars.X`, fails the step. |
 
 [Cloudflare API Reference](https://api.cloudflare.com/#workers-kv-namespace-write-key-value-pair)
 
 ## Outputs
 
 | Name    | Description |
-| ------- | ----------- | ------------------------------------------------------------------------------------------------------------ |
-| `value` | optional    | Use "value" to set a key; omit to retrieve the current value. Ignored when `operation` is `get` or `delete`. |
+| ------- | ----------- |
+| `value` | KV value    |
 
 The output `value` and its parts are masked in logs: each line, and each string
 or number inside a JSON value. Short values such as `1` or `true` are masked
