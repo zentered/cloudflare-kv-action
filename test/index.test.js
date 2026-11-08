@@ -76,4 +76,12 @@ describe('action: masking', () => {
     assert.ok(out.includes('::add-mask::line-a\n'), out)
     assert.ok(out.includes('::add-mask::line-b\n'), out)
   })
+
+  it('masks the innermost leaf of a deeply nested array', () => {
+    const depth = 4000
+    const body = '['.repeat(depth) + '"deep-secret"' + ']'.repeat(depth)
+    const out = runAction({ STUB_BODY: body })
+    assert.ok(out.includes('::add-mask::deep-secret\n'), out.slice(0, 300))
+    assert.ok(!out.includes('::error::'), out.slice(0, 300))
+  })
 })

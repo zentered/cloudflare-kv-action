@@ -14,11 +14,18 @@ function maskValue(value) {
     }
   }
 
-  const addLeaves = (node) => {
-    if (typeof node === 'string' || typeof node === 'number') {
-      add(String(node))
-    } else if (node && typeof node === 'object') {
-      Object.values(node).forEach(addLeaves)
+  // Explicit stack: deeply nested JSON must not overflow the call stack.
+  const addLeaves = (root) => {
+    const stack = [root]
+    while (stack.length > 0) {
+      const node = stack.pop()
+      if (typeof node === 'string' || typeof node === 'number') {
+        add(String(node))
+      } else if (node && typeof node === 'object') {
+        for (const child of Object.values(node)) {
+          stack.push(child)
+        }
+      }
     }
   }
 
