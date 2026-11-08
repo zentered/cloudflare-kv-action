@@ -89,6 +89,10 @@ credentials. You can retrieve them on your
 | ------- | ----------- | ------------------------------------------------------------------------------------------------------------ |
 | `value` | optional    | Use "value" to set a key; omit to retrieve the current value. Ignored when `operation` is `get` or `delete`. |
 
+The output `value` and its parts are masked in logs: each line, and each string
+or number inside a JSON value. Short values such as `1` or `true` are masked
+too, so they also disappear from other log lines.
+
 ## Development
 
 Requirements: Node >= 20
