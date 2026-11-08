@@ -84,4 +84,10 @@ describe('action: masking', () => {
     assert.ok(out.includes('::add-mask::deep-secret\n'), out.slice(0, 300))
     assert.ok(!out.includes('::error::'), out.slice(0, 300))
   })
+
+  it('masks the JSON-escaped form of a string leaf with quotes and backslashes', () => {
+    const out = runAction({ STUB_BODY: '{"t":"ab\\"cd\\\\ef"}' })
+    assert.ok(out.includes('::add-mask::ab"cd\\ef\n'), out)
+    assert.ok(out.includes('::add-mask::ab\\"cd\\\\ef\n'), out)
+  })
 })

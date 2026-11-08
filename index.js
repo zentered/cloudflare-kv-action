@@ -19,7 +19,14 @@ function maskValue(value) {
     const stack = [root]
     while (stack.length > 0) {
       const node = stack.pop()
-      if (typeof node === 'string' || typeof node === 'number') {
+      if (typeof node === 'string') {
+        add(node)
+        // toJSON prints quotes and backslashes escaped.
+        const escaped = JSON.stringify(node).slice(1, -1)
+        if (escaped !== node) {
+          add(escaped)
+        }
+      } else if (typeof node === 'number') {
         add(String(node))
       } else if (node && typeof node === 'object') {
         for (const child of Object.values(node)) {
