@@ -230,3 +230,38 @@ describe('e2e: put and get', () => {
     assert.deepEqual(result, { hello: 'world' })
   })
 })
+
+describe('unit: key name encoding', () => {
+  let capturedUrl
+
+  before(() => {
+    globalThis.fetch = async (url) => {
+      capturedUrl = url
+      return { ok: true, text: async () => 'null' }
+    }
+  })
+
+  after(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  it('encodes / and ? in the key on GET', async () => {
+    await kv('acct', '', 'tok', 'ns', 'config/prod?x=1')
+    const url = new URL(capturedUrl)
+    assert.equal(url.search, '')
+    assert.ok(
+      url.pathname.endsWith('/values/config%2Fprod%3Fx%3D1'),
+      `url was: ${capturedUrl}`
+    )
+  })
+
+  it('encodes the key on PUT and keeps expiration query intact', async () => {
+    await kv('acct', '', 'tok', 'ns', 'a b#c%d', 'val', null, 120)
+    const url = new URL(capturedUrl)
+    assert.ok(
+      url.pathname.endsWith('/values/a%20b%23c%25d'),
+      `url was: ${capturedUrl}`
+    )
+    assert.equal(url.search, '?expiration_ttl=120')
+  })
+})

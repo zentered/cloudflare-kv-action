@@ -65,7 +65,7 @@ export default async function kv(
   expiration,
   expirationTtl
 ) {
-  const kvUrl = `https://api.cloudflare.com/client/${API_VERSION}/accounts/${accountId}/storage/kv/namespaces/${namespaceId}/values/${key}`
+  const kvUrl = `https://api.cloudflare.com/client/${API_VERSION}/accounts/${accountId}/storage/kv/namespaces/${namespaceId}/values/${encodeURIComponent(key)}`
 
   const headers = accountEmail
     ? {
