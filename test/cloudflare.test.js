@@ -311,28 +311,87 @@ describe('unit: operation input', () => {
 })
 
 describe('unit: missing key on GET', () => {
-  before(() => {
+  const keyNotFound =
+    '{"success":false,"errors":[{"code":10009,"message":"get: \'key not found\'"}]}'
+  const namespaceNotFound =
+    '{"success":false,"errors":[{"code":10013,"message":"namespace not found"}]}'
+
+  const respond404 = (body) => {
     globalThis.fetch = async () => ({
       ok: false,
       status: 404,
       statusText: 'Not Found',
-      text: async () => '{"success":false}'
+      text: async () => body
     })
-  })
+  }
 
   after(() => {
     globalThis.fetch = originalFetch
   })
 
-  it('returns an empty string on 404 by default', async () => {
-    const result = await kv('acct', '', 'tok', 'ns', 'key')
-    assert.equal(result, '')
+  it('throws on a missing key by default', async () => {
+    respond404(keyNotFound)
+    await assert.rejects(
+      () => kv('acct', '', 'tok', 'ns', 'key'),
+      /GET failed: 404 Not Found/
+    )
   })
 
-  it('throws on 404 when fail_on_missing is true', async () => {
+  it('throws on a missing key when fail_on_missing is true', async () => {
+    respond404(keyNotFound)
     await assert.rejects(
       () => kv('acct', '', 'tok', 'ns', 'key', '', null, null, 'get', true),
       /GET failed: 404 Not Found/
+    )
+  })
+
+  it('returns an empty string for a missing key when fail_on_missing is false', async () => {
+    respond404(keyNotFound)
+    const result = await kv(
+      'acct',
+      '',
+      'tok',
+      'ns',
+      'key',
+      '',
+      null,
+      null,
+      'get',
+      false
+    )
+    assert.equal(result, '')
+  })
+
+  it('matches the key-not-found message when the code differs', async () => {
+    respond404('{"errors":[{"code":1,"message":"get: \'Key Not Found\'"}]}')
+    const result = await kv(
+      'a',
+      '',
+      't',
+      'ns',
+      'k',
+      '',
+      null,
+      null,
+      'get',
+      false
+    )
+    assert.equal(result, '')
+  })
+
+  it('throws on another 404 even when fail_on_missing is false', async () => {
+    respond404(namespaceNotFound)
+    await assert.rejects(
+      () => kv('acct', '', 'tok', 'ns', 'key', '', null, null, 'get', false),
+      /GET failed: 404 Not Found .*namespace not found/
+    )
+  })
+
+  it('throws on a 404 with an unparseable body when fail_on_missing is false', async () => {
+    respond404('<html>Not Found</html>')
+    await assert.rejects(
+      () => kv('acct', '', 'tok', 'ns', 'key', '', null, null, 'get', false),
+      /GET failed: 404 Not Found .*<html>/
     )
   })
 

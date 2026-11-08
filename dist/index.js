@@ -33963,15 +33963,28 @@ async function set(kvUrl, headers, value, expiration, expirationTtl) {
   return null
 }
 
+// Cloudflare does not document the error for a missing key. The API returns
+// code 10009 with the message "get: 'key not found'". Other 404s (unknown
+// namespace or account) carry other errors and must not count as missing.
+function isKeyNotFound(body) {
+  try {
+    return JSON.parse(body).errors.some(
+      (error) =>
+        error.code === 10009 || /key not found/i.test(error.message ?? '')
+    )
+  } catch {
+    return false
+  }
+}
+
 async function get(kvUrl, headers, failOnMissing) {
   const response = await fetch(kvUrl, { headers })
 
-  if (response.status === 404 && !failOnMissing) {
-    return ''
-  }
-
   if (!response.ok) {
     const body = await response.text().catch(() => '')
+    if (response.status === 404 && !failOnMissing && isKeyNotFound(body)) {
+      return ''
+    }
     throw new Error(
       `GET failed: ${response.status} ${response.statusText}${body ? ` — ${body}` : ''}`
     )
@@ -34010,7 +34023,7 @@ async function kv(
   expiration,
   expirationTtl,
   operation,
-  failOnMissing
+  failOnMissing = true
 ) {
   if (operation && !OPERATIONS.includes(operation)) {
     throw new Error(
@@ -34060,7 +34073,7 @@ async function run() {
     const expirationTtl = getInput('expiration_ttl')
     const expiration = getInput('expiration')
     const operation = getInput('operation').toLowerCase()
-    const failOnMissing = getInput('fail_on_missing').toLowerCase() === 'true'
+    const failOnMissing = getBooleanInput('fail_on_missing')
 
     const returnValue = await kv(
       accountId,

@@ -9,8 +9,9 @@ GitHub Action for GET/PUT/DELETE operations on Cloudflare Workers KV storage.
 Entry point is `index.js` which reads action inputs, core logic is in
 `cloudflare.js` which calls the Cloudflare API. Without the `operation` input
 the action infers it: if `value` is provided it PUTs, otherwise it GETs and
-returns the value as output. A GET on a missing key returns an empty output
-unless `fail_on_missing` is `true`.
+returns the value as output. A GET on a missing key fails the step unless
+`fail_on_missing` is `false`, which gives an empty output. Only the
+key-not-found 404 counts as missing.
 
 Auth supports both legacy (API Key + Email) and modern (Bearer token) methods.
 

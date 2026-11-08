@@ -20,12 +20,16 @@ inputs:
     required: false
   operation:
     description:
-      'One of get, put, delete. Default: put if value is not empty, else get'
+      'One of get, put, delete. Default: put if value is not empty, else get.
+      The value input is ignored for get and delete. The expiration inputs are
+      ignored for get and delete.'
     required: false
   fail_on_missing:
-    description: 'Fail the step when a get finds no key (HTTP 404)'
+    description:
+      'Fail the step when a get finds no key. Set to false for an empty output.
+      Other errors, including an unknown namespace, always fail.'
     required: false
-    default: 'false'
+    default: 'true'
 
 name: Cloudflare KV Action
 outputs:

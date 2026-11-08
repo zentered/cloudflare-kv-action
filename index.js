@@ -13,8 +13,7 @@ async function run() {
     const expirationTtl = core.getInput('expiration_ttl')
     const expiration = core.getInput('expiration')
     const operation = core.getInput('operation').toLowerCase()
-    const failOnMissing =
-      core.getInput('fail_on_missing').toLowerCase() === 'true'
+    const failOnMissing = core.getBooleanInput('fail_on_missing')
 
     const returnValue = await kv(
       accountId,
