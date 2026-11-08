@@ -25,6 +25,14 @@ async function run() {
     )
 
     if (returnValue !== null && returnValue !== undefined) {
+      // KV often holds tokens. Mask before the value can reach any log.
+      const masked =
+        typeof returnValue === 'string'
+          ? returnValue
+          : JSON.stringify(returnValue)
+      if (masked) {
+        core.setSecret(masked)
+      }
       core.setOutput('value', returnValue)
     }
   } catch (error) {

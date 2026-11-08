@@ -33672,7 +33672,7 @@ function exportVariable(name, val) {
  * ```
  */
 function core_setSecret(secret) {
-  issueCommand('add-mask', {}, secret)
+  command_issueCommand('add-mask', {}, secret)
 }
 /**
  * Prepends inputPath to the PATH (for this action and future actions)
@@ -34035,6 +34035,14 @@ async function run() {
     )
 
     if (returnValue !== null && returnValue !== undefined) {
+      // KV often holds tokens. Mask before the value can reach any log.
+      const masked =
+        typeof returnValue === 'string'
+          ? returnValue
+          : JSON.stringify(returnValue)
+      if (masked) {
+        core_setSecret(masked)
+      }
       setOutput('value', returnValue)
     }
   } catch (error) {
