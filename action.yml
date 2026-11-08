@@ -18,6 +18,14 @@ inputs:
   value:
     description: 'Cloudflare KV value'
     required: false
+  operation:
+    description:
+      'One of get, put, delete. Default: put if value is not empty, else get'
+    required: false
+  fail_on_missing:
+    description: 'Fail the step when a get finds no key (HTTP 404)'
+    required: false
+    default: 'false'
 
 name: Cloudflare KV Action
 outputs:

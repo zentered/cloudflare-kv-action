@@ -146,13 +146,13 @@ describe('unit: error handling', () => {
   it('throws on GET failure', async () => {
     globalThis.fetch = async () => ({
       ok: false,
-      status: 404,
-      statusText: 'Not Found',
+      status: 500,
+      statusText: 'Server Error',
       text: async () => ''
     })
     await assert.rejects(
       () => kv('acct', '', 'tok', 'ns', 'key'),
-      /GET failed: 404 Not Found/
+      /GET failed: 500 Server Error/
     )
     globalThis.fetch = originalFetch
   })
@@ -228,5 +228,124 @@ describe('e2e: put and get', () => {
   it('get', async () => {
     const result = await kv('acct', '', 'tok', 'ns', 'test-key')
     assert.deepEqual(result, { hello: 'world' })
+  })
+})
+
+describe('unit: operation input', () => {
+  let calls
+
+  before(() => {
+    globalThis.fetch = async (url, init) => {
+      calls.push({ url, init: init || {} })
+      return { ok: true, text: async () => 'null' }
+    }
+  })
+
+  after(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  const run = (value, operation, failOnMissing) => {
+    calls = []
+    return kv(
+      'acct',
+      '',
+      'tok',
+      'ns',
+      'key',
+      value,
+      null,
+      null,
+      operation,
+      failOnMissing
+    )
+  }
+
+  it('puts an empty string when operation is put', async () => {
+    await run('', 'put')
+    assert.equal(calls.length, 1)
+    assert.equal(calls[0].init.method, 'PUT')
+    assert.equal(calls[0].init.body, '')
+  })
+
+  it('sends DELETE when operation is delete', async () => {
+    const result = await run('', 'delete')
+    assert.equal(calls[0].init.method, 'DELETE')
+    assert.ok(calls[0].url.endsWith('/values/key'), calls[0].url)
+    assert.equal(result, null)
+  })
+
+  it('throws when DELETE fails', async () => {
+    globalThis.fetch = async () => ({
+      ok: false,
+      status: 403,
+      statusText: 'Forbidden',
+      text: async () => ''
+    })
+    await assert.rejects(() => run('', 'delete'), /DELETE failed: 403/)
+  })
+
+  it('gets when operation is get, even if a value is given', async () => {
+    globalThis.fetch = async (url, init) => {
+      calls.push({ url, init: init || {} })
+      return { ok: true, text: async () => 'stored' }
+    }
+    const result = await run('ignored', 'get')
+    assert.equal(calls[0].init.method, undefined)
+    assert.equal(result, 'stored')
+  })
+
+  it('infers put from a non-empty value when operation is empty', async () => {
+    await run('v', '')
+    assert.equal(calls[0].init.method, 'PUT')
+  })
+
+  it('infers get from an empty value when operation is empty', async () => {
+    await run('', '')
+    assert.equal(calls[0].init.method, undefined)
+  })
+
+  it('rejects an unknown operation', async () => {
+    await assert.rejects(() => run('', 'purge'), /Invalid operation: purge/)
+  })
+})
+
+describe('unit: missing key on GET', () => {
+  before(() => {
+    globalThis.fetch = async () => ({
+      ok: false,
+      status: 404,
+      statusText: 'Not Found',
+      text: async () => '{"success":false}'
+    })
+  })
+
+  after(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  it('returns an empty string on 404 by default', async () => {
+    const result = await kv('acct', '', 'tok', 'ns', 'key')
+    assert.equal(result, '')
+  })
+
+  it('throws on 404 when fail_on_missing is true', async () => {
+    await assert.rejects(
+      () => kv('acct', '', 'tok', 'ns', 'key', '', null, null, 'get', true),
+      /GET failed: 404 Not Found/
+    )
+  })
+
+  it('still throws on other GET errors', async () => {
+    globalThis.fetch = async () => ({
+      ok: false,
+      status: 500,
+      statusText: 'Server Error',
+      text: async () => ''
+    })
+    await assert.rejects(
+      () => kv('acct', '', 'tok', 'ns', 'key'),
+      /GET failed: 500/
+    )
   })
 })

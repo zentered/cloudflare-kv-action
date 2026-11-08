@@ -37,8 +37,12 @@ async function set(kvUrl, headers, value, expiration, expirationTtl) {
   return null
 }
 
-async function get(kvUrl, headers) {
+async function get(kvUrl, headers, failOnMissing) {
   const response = await fetch(kvUrl, { headers })
+
+  if (response.status === 404 && !failOnMissing) {
+    return ''
+  }
 
   if (!response.ok) {
     const body = await response.text().catch(() => '')
@@ -55,6 +59,21 @@ async function get(kvUrl, headers) {
   }
 }
 
+async function remove(kvUrl, headers) {
+  const response = await fetch(kvUrl, { method: 'DELETE', headers })
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => '')
+    throw new Error(
+      `DELETE failed: ${response.status} ${response.statusText}${body ? ` — ${body}` : ''}`
+    )
+  }
+
+  return null
+}
+
+const OPERATIONS = ['get', 'put', 'delete']
+
 export default async function kv(
   accountId,
   accountEmail,
@@ -63,8 +82,16 @@ export default async function kv(
   key,
   value,
   expiration,
-  expirationTtl
+  expirationTtl,
+  operation,
+  failOnMissing
 ) {
+  if (operation && !OPERATIONS.includes(operation)) {
+    throw new Error(
+      `Invalid operation: ${operation}. Use one of: ${OPERATIONS.join(', ')}`
+    )
+  }
+
   const kvUrl = `https://api.cloudflare.com/client/${API_VERSION}/accounts/${accountId}/storage/kv/namespaces/${namespaceId}/values/${key}`
 
   const headers = accountEmail
@@ -76,11 +103,21 @@ export default async function kv(
         Authorization: `Bearer ${apiKey}`
       }
 
-  if (value && (value.length > 0 || Object.keys(value).length > 0)) {
+  // Without an explicit operation, infer it: a non-empty value sets, else get.
+  const op =
+    operation ||
+    (value && (value.length > 0 || Object.keys(value).length > 0)
+      ? 'put'
+      : 'get')
+
+  if (op === 'put') {
     core.info(`Setting value for ${key}`)
-    return set(kvUrl, headers, value, expiration, expirationTtl)
+    return set(kvUrl, headers, value ?? '', expiration, expirationTtl)
+  } else if (op === 'delete') {
+    core.info(`Deleting ${key}`)
+    return remove(kvUrl, headers)
   } else {
     core.info(`Getting value for ${key}`)
-    return get(kvUrl, headers)
+    return get(kvUrl, headers, failOnMissing)
   }
 }

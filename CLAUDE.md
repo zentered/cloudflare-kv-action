@@ -5,10 +5,12 @@ code in this repository.
 
 ## Project Overview
 
-GitHub Action for GET/PUT operations on Cloudflare Workers KV storage. Entry
-point is `index.js` which reads action inputs, core logic is in `cloudflare.js`
-which calls the Cloudflare API. The action auto-detects: if `value` input is
-provided it PUTs, otherwise it GETs and returns the value as output.
+GitHub Action for GET/PUT/DELETE operations on Cloudflare Workers KV storage.
+Entry point is `index.js` which reads action inputs, core logic is in
+`cloudflare.js` which calls the Cloudflare API. Without the `operation` input
+the action infers it: if `value` is provided it PUTs, otherwise it GETs and
+returns the value as output. A GET on a missing key returns an empty output
+unless `fail_on_missing` is `true`.
 
 Auth supports both legacy (API Key + Email) and modern (Bearer token) methods.
 

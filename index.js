@@ -12,6 +12,9 @@ async function run() {
     const value = core.getInput('value')
     const expirationTtl = core.getInput('expiration_ttl')
     const expiration = core.getInput('expiration')
+    const operation = core.getInput('operation').toLowerCase()
+    const failOnMissing =
+      core.getInput('fail_on_missing').toLowerCase() === 'true'
 
     const returnValue = await kv(
       accountId,
@@ -21,7 +24,9 @@ async function run() {
       key,
       value,
       expiration,
-      expirationTtl
+      expirationTtl,
+      operation,
+      failOnMissing
     )
 
     if (returnValue !== null && returnValue !== undefined) {
