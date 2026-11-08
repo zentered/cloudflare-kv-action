@@ -19,6 +19,8 @@ function runAction(env) {
         CLOUDFLARE_API_KEY: 'tok',
         INPUT_NAMESPACE_IDENTIFIER: 'ns',
         INPUT_KEY_NAME: 'key',
+        // The runner applies the action.yml default.
+        INPUT_FAIL_ON_MISSING: 'true',
         ...env
       },
       encoding: 'utf8'
